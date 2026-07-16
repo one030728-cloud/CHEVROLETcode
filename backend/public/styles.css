@@ -1,20 +1,21 @@
 * { box-sizing: border-box; }
 
 :root {
-  --gold: #d4af37;
-  --gold-bright: #f0cf5c;
-  --ink: #0b0d12;
-  --panel: #ffffff;
-  --muted: #6b7280;
-  --border: #e5e7eb;
-  --error: #ef4444;
+  --blue: #3182f6;
+  --blue-dark: #1b64da;
+  --blue-tint: #eef4ff;
+  --ink: #191f28;
+  --muted: #8b95a1;
+  --border: #e5e8eb;
+  --surface: #f2f4f6;
+  --error: #f04452;
 }
 
 body {
   margin: 0;
   min-height: 100vh;
   font-family: -apple-system, BlinkMacSystemFont, "Pretendard", "Malgun Gothic", sans-serif;
-  background: radial-gradient(circle at 50% 0%, #1a1d24 0%, var(--ink) 55%);
+  background: #ffffff;
   color: var(--ink);
 }
 
@@ -29,15 +30,14 @@ body {
 .card {
   width: 100%;
   max-width: 380px;
-  background: var(--panel);
-  border-radius: 20px;
-  padding: 32px 28px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.04);
-  animation: cardIn 0.35s ease both;
+  background: #ffffff;
+  border-radius: 24px;
+  padding: 32px 24px;
+  animation: cardIn 0.3s ease both;
 }
 
 @keyframes cardIn {
-  from { opacity: 0; transform: translateY(12px); }
+  from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
 }
 
@@ -50,24 +50,24 @@ body {
   display: inline-block;
   font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.18em;
-  color: var(--gold);
-  background: rgba(212, 175, 55, 0.1);
-  border: 1px solid rgba(212, 175, 55, 0.35);
+  letter-spacing: 0.14em;
+  color: var(--blue);
+  background: var(--blue-tint);
   border-radius: 999px;
-  padding: 4px 12px;
-  margin-bottom: 12px;
+  padding: 5px 12px;
+  margin-bottom: 14px;
 }
 
 .header h1 {
-  font-size: 21px;
+  font-size: 22px;
   font-weight: 700;
-  margin: 0 0 4px;
-  letter-spacing: -0.01em;
+  margin: 0 0 6px;
+  letter-spacing: -0.02em;
+  color: var(--ink);
 }
 
 .header p {
-  font-size: 14px;
+  font-size: 15px;
   color: var(--muted);
   margin: 0;
 }
@@ -89,7 +89,7 @@ body {
 }
 
 .dot.active {
-  background: var(--gold);
+  background: var(--blue);
 }
 
 .step {
@@ -107,10 +107,10 @@ body {
 
 .field-label {
   display: block;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--muted);
-  margin: 0 0 6px 2px;
+  margin: 0 0 8px 2px;
 }
 
 .input-wrap {
@@ -120,26 +120,33 @@ body {
 
 .input-icon {
   position: absolute;
-  left: 14px;
+  left: 16px;
   top: 50%;
   transform: translateY(-50%);
-  font-size: 16px;
+  font-size: 18px;
   pointer-events: none;
 }
 
 input[type="text"], input[type="tel"], input[type="number"] {
   width: 100%;
-  padding: 14px 16px 14px 40px;
-  font-size: 17px;
-  border: 1.5px solid var(--border);
-  border-radius: 12px;
+  padding: 16px 16px 16px 44px;
+  font-size: 18px;
+  font-weight: 500;
+  background: var(--surface);
+  border: 1.5px solid transparent;
+  border-radius: 14px;
   outline: none;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  color: var(--ink);
+  transition: border-color 0.15s, background 0.15s;
+}
+
+input[type="text"]::placeholder, input[type="tel"]::placeholder, input[type="number"]::placeholder {
+  color: #b0b8c1;
 }
 
 input[type="text"]:focus, input[type="tel"]:focus, input[type="number"]:focus {
-  border-color: var(--gold);
-  box-shadow: 0 0 0 3px rgba(212, 175, 55, 0.15);
+  border-color: var(--blue);
+  background: #ffffff;
 }
 
 .error {
@@ -148,19 +155,20 @@ input[type="text"]:focus, input[type="tel"]:focus, input[type="number"]:focus {
   text-align: center;
   min-height: 18px;
   margin: 0 0 8px;
+  font-weight: 500;
 }
 
 button {
   width: 100%;
-  padding: 14px;
-  font-size: 15px;
+  padding: 16px;
+  font-size: 16px;
   font-weight: 700;
-  border-radius: 12px;
+  border-radius: 14px;
   border: none;
   cursor: pointer;
-  background: var(--ink);
+  background: var(--blue);
   color: #ffffff;
-  transition: transform 0.1s, background 0.15s, box-shadow 0.15s;
+  transition: background 0.15s, transform 0.1s;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -168,8 +176,7 @@ button {
 }
 
 button:hover:not(:disabled) {
-  background: #22262f;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
+  background: var(--blue-dark);
 }
 
 button:active:not(:disabled) {
@@ -177,7 +184,8 @@ button:active:not(:disabled) {
 }
 
 button:disabled {
-  opacity: 0.35;
+  background: var(--surface);
+  color: #b0b8c1;
   cursor: not-allowed;
 }
 
@@ -186,20 +194,18 @@ button.ghost {
   color: var(--muted);
   font-weight: 500;
   margin-top: 4px;
-  box-shadow: none;
 }
 
 button.ghost:hover:not(:disabled) {
   background: transparent;
   color: var(--ink);
-  box-shadow: none;
 }
 
 .spinner {
   width: 16px;
   height: 16px;
   border-radius: 999px;
-  border: 2px solid rgba(255, 255, 255, 0.35);
+  border: 2px solid rgba(255, 255, 255, 0.4);
   border-top-color: #fff;
   animation: spin 0.6s linear infinite;
 }
@@ -216,13 +222,12 @@ button.ghost:hover:not(:disabled) {
   width: 64px;
   height: 64px;
   border-radius: 999px;
-  background: linear-gradient(135deg, var(--gold-bright), var(--gold));
-  color: var(--ink);
+  background: var(--blue-tint);
+  color: var(--blue);
   display: flex;
   align-items: center;
   justify-content: center;
   margin: 0 auto 24px;
-  box-shadow: 0 8px 24px rgba(212, 175, 55, 0.35);
   animation: popIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both;
 }
 
@@ -232,12 +237,12 @@ button.ghost:hover:not(:disabled) {
 }
 
 .check-circle {
-  stroke: var(--ink);
+  stroke: var(--blue);
   stroke-width: 0;
 }
 
 .check-mark {
-  stroke: var(--ink);
+  stroke: var(--blue);
   stroke-width: 4;
   stroke-linecap: round;
   stroke-linejoin: round;
@@ -251,13 +256,14 @@ button.ghost:hover:not(:disabled) {
 }
 
 #step-done h1 {
-  font-size: 20px;
+  font-size: 21px;
   font-weight: 700;
   margin: 0 0 8px;
+  color: var(--ink);
 }
 
 #step-done p {
-  font-size: 14px;
+  font-size: 15px;
   color: var(--muted);
   margin: 0;
   line-height: 1.5;
@@ -266,6 +272,5 @@ button.ghost:hover:not(:disabled) {
 @media (max-width: 400px) {
   .card {
     padding: 28px 20px;
-    border-radius: 16px;
   }
 }
