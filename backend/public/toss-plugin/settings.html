@@ -14,7 +14,9 @@
     <!--
       플러그인 설정 화면. 지금은 매장/알림톡 관련 값이 전부 서버 .env로
       관리되고 있어(README "알림톡 템플릿 변수" 참고) 단말기에서 바꿀 값이 없다.
-      현재는 안내 텍스트만 있는 결과 화면으로 대체한다.
+      renderResultPage(type:text)로 안내 문구를 보여준다. timerMs가 지나면
+      자동으로 대기화면으로 돌아간다 (값을 명시하지 않으면 SDK 기본 카운트다운이
+      적용되는데 몇 초인지 문서에 명시가 없어서 명시적으로 지정해둔다).
       나중에 결제금액 자동입력 등 단말기별 설정이 필요해지면
       sdk.template.renderInputPage + sdk.storage로 값을 저장하도록 확장하면 된다.
     -->
@@ -25,6 +27,10 @@
         text: '설정 없음',
         title: '플러그인 설정',
         description: '현재 단말기에서 바꿀 수 있는 설정이 없습니다.',
+        timerMs: 10000,
+        onTimeout: () => {
+          location.href = './index.html'
+        },
         localeCode: 'ko',
       })
     </script>
