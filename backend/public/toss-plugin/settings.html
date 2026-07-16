@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="stylesheet" href="https://static.toss.im/tds/43.9.4/css/tds.min.css" />
+    <link rel="stylesheet" type="text/css" href="https://static.toss.im/tps/main.css" />
+    <link rel="stylesheet" type="text/css" href="https://static.toss.im/tps/others.css" />
+    <script src="https://cdn.tossplace.com/toss-front-sdk/v0/index.js"></script>
+    <script src="./sdk.js"></script>
+    <title>설정 - Toss Front Plugin</title>
+  </head>
+  <body>
+    <!--
+      플러그인 설정 화면. 지금은 매장/알림톡 관련 값이 전부 서버 .env로
+      관리되고 있어(README "알림톡 템플릿 변수" 참고) 단말기에서 바꿀 값이 없다.
+      현재는 안내 텍스트만 있는 결과 화면으로 대체한다.
+      나중에 결제금액 자동입력 등 단말기별 설정이 필요해지면
+      sdk.template.renderInputPage + sdk.storage로 값을 저장하도록 확장하면 된다.
+    -->
+    <div id="app"></div>
+    <script>
+      sdk.template.renderResultPage({
+        type: 'text',
+        text: '설정 없음',
+        title: '플러그인 설정',
+        description: '현재 단말기에서 바꿀 수 있는 설정이 없습니다.',
+        localeCode: 'ko',
+      })
+    </script>
+  </body>
+</html>

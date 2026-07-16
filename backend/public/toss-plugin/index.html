@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="stylesheet" href="https://static.toss.im/tds/43.9.4/css/tds.min.css" />
+    <link rel="stylesheet" type="text/css" href="https://static.toss.im/tps/main.css" />
+    <link rel="stylesheet" type="text/css" href="https://static.toss.im/tps/others.css" />
+    <script src="https://cdn.tossplace.com/toss-front-sdk/v0/index.js"></script>
+    <script src="./sdk.js"></script>
+    <title>쉐보레 예약/결제 - Toss Front Plugin</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script>
+      sdk.template.renderIdlePage({
+        type: 'twoButton',
+        title: {
+          text1: '쉐보레',
+          text2: '예약 · 결제',
+        },
+        description: {
+          text: '차량번호로 예약하거나, 결제 후 전자영수증을 받아보세요.',
+        },
+        primaryButton: {
+          text: '예약하기',
+          onClick: () => {
+            location.href = './reservation.html'
+          },
+        },
+        secondaryButton: {
+          text: '결제 확인',
+          onClick: () => {
+            location.href = './payment.html'
+          },
+        },
+      })
+    </script>
+  </body>
+</html>

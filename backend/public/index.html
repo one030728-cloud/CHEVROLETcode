@@ -3,6 +3,8 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+<meta name="theme-color" content="#0b0d12" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🚗</text></svg>" />
 <title>쉐보레 예약</title>
 <link rel="stylesheet" href="styles.css" />
 </head>
@@ -10,6 +12,7 @@
   <main class="wrap">
     <div class="card">
       <div class="header">
+        <div class="badge">CHEVROLET</div>
         <h1 id="title">예약하기</h1>
         <p id="subtitle">차량번호를 입력해주세요</p>
       </div>
@@ -20,22 +23,43 @@
       </div>
 
       <section id="step-car" class="step">
-        <input id="carNumber" type="text" inputmode="text" placeholder="예) 12가3456" autofocus />
-        <p id="carError" class="error"></p>
+        <label class="field-label" for="carNumber">차량번호</label>
+        <div class="input-wrap">
+          <span class="input-icon" aria-hidden="true">🚘</span>
+          <input id="carNumber" type="text" inputmode="text" placeholder="예) 12가3456" autofocus autocomplete="off" />
+        </div>
+        <p id="carError" class="error" role="alert"></p>
         <button id="toPhoneBtn" disabled>다음</button>
+        <button id="skipCarBtn" class="ghost hidden">차량번호 없이 진행</button>
       </section>
 
       <section id="step-phone" class="step hidden">
-        <input id="phone" type="tel" inputmode="tel" placeholder="010-1234-5678" />
-        <p id="phoneError" class="error"></p>
-        <button id="submitBtn" disabled>예약 완료</button>
+        <label class="field-label" for="phone">전화번호</label>
+        <div class="input-wrap">
+          <span class="input-icon" aria-hidden="true">📱</span>
+          <input id="phone" type="tel" inputmode="tel" placeholder="010-1234-5678" autocomplete="off" />
+        </div>
+        <div id="amountWrap" class="input-wrap hidden">
+          <span class="input-icon" aria-hidden="true">💳</span>
+          <input id="amount" type="number" inputmode="numeric" placeholder="결제금액 (선택)" />
+        </div>
+        <p id="phoneError" class="error" role="alert"></p>
+        <button id="submitBtn" disabled>
+          <span class="btn-label">예약 완료</span>
+          <span class="spinner hidden" aria-hidden="true"></span>
+        </button>
         <button id="backBtn" class="ghost">이전으로</button>
       </section>
 
       <section id="step-done" class="step hidden">
-        <div class="check">✓</div>
-        <h1>예약이 접수되었습니다</h1>
-        <p>알림톡으로 안내드렸어요.</p>
+        <div class="check">
+          <svg viewBox="0 0 52 52" width="32" height="32">
+            <circle class="check-circle" cx="26" cy="26" r="24" fill="none" />
+            <path class="check-mark" fill="none" d="M14 27l7 7 17-17" />
+          </svg>
+        </div>
+        <h1 id="doneTitle">예약이 접수되었습니다</h1>
+        <p id="doneMessage">순서가 되면 알림톡으로 안내드려요.</p>
       </section>
     </div>
   </main>

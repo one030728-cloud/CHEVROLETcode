@@ -1,10 +1,21 @@
 * { box-sizing: border-box; }
 
+:root {
+  --gold: #d4af37;
+  --gold-bright: #f0cf5c;
+  --ink: #0b0d12;
+  --panel: #ffffff;
+  --muted: #6b7280;
+  --border: #e5e7eb;
+  --error: #ef4444;
+}
+
 body {
   margin: 0;
+  min-height: 100vh;
   font-family: -apple-system, BlinkMacSystemFont, "Pretendard", "Malgun Gothic", sans-serif;
-  background: #ffffff;
-  color: #111827;
+  background: radial-gradient(circle at 50% 0%, #1a1d24 0%, var(--ink) 55%);
+  color: var(--ink);
 }
 
 .wrap {
@@ -17,23 +28,47 @@ body {
 
 .card {
   width: 100%;
-  max-width: 360px;
+  max-width: 380px;
+  background: var(--panel);
+  border-radius: 20px;
+  padding: 32px 28px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.04);
+  animation: cardIn 0.35s ease both;
+}
+
+@keyframes cardIn {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .header {
   text-align: center;
-  margin-bottom: 32px;
+  margin-bottom: 28px;
+}
+
+.badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: var(--gold);
+  background: rgba(212, 175, 55, 0.1);
+  border: 1px solid rgba(212, 175, 55, 0.35);
+  border-radius: 999px;
+  padding: 4px 12px;
+  margin-bottom: 12px;
 }
 
 .header h1 {
-  font-size: 20px;
-  font-weight: 600;
+  font-size: 21px;
+  font-weight: 700;
   margin: 0 0 4px;
+  letter-spacing: -0.01em;
 }
 
 .header p {
   font-size: 14px;
-  color: #6b7280;
+  color: var(--muted);
   margin: 0;
 }
 
@@ -42,42 +77,73 @@ body {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  margin-bottom: 32px;
+  margin-bottom: 28px;
 }
 
 .dot {
-  height: 6px;
-  width: 40px;
+  height: 4px;
+  width: 36px;
   border-radius: 999px;
-  background: #e5e7eb;
+  background: var(--border);
+  transition: background 0.25s;
 }
 
 .dot.active {
-  background: #111827;
+  background: var(--gold);
 }
 
-.step.hidden {
+.step {
+  animation: stepIn 0.25s ease both;
+}
+
+@keyframes stepIn {
+  from { opacity: 0; transform: translateX(8px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.step.hidden, .hidden {
   display: none;
 }
 
-input[type="text"], input[type="tel"] {
-  width: 100%;
-  padding: 14px 16px;
-  font-size: 18px;
-  text-align: center;
-  border: 1px solid #e5e7eb;
-  border-radius: 12px;
-  outline: none;
+.field-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  margin: 0 0 6px 2px;
+}
+
+.input-wrap {
+  position: relative;
   margin-bottom: 12px;
 }
 
-input[type="text"]:focus, input[type="tel"]:focus {
-  border-color: #111827;
-  box-shadow: 0 0 0 2px rgba(17, 24, 39, 0.1);
+.input-icon {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 16px;
+  pointer-events: none;
+}
+
+input[type="text"], input[type="tel"], input[type="number"] {
+  width: 100%;
+  padding: 14px 16px 14px 40px;
+  font-size: 17px;
+  border: 1.5px solid var(--border);
+  border-radius: 12px;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+input[type="text"]:focus, input[type="tel"]:focus, input[type="number"]:focus {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 3px rgba(212, 175, 55, 0.15);
 }
 
 .error {
-  color: #ef4444;
+  color: var(--error);
   font-size: 13px;
   text-align: center;
   min-height: 18px;
@@ -87,35 +153,59 @@ input[type="text"]:focus, input[type="tel"]:focus {
 button {
   width: 100%;
   padding: 14px;
-  font-size: 14px;
-  font-weight: 600;
+  font-size: 15px;
+  font-weight: 700;
   border-radius: 12px;
   border: none;
   cursor: pointer;
-  background: #111827;
+  background: var(--ink);
   color: #ffffff;
-  transition: background 0.15s;
+  transition: transform 0.1s, background 0.15s, box-shadow 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
 }
 
 button:hover:not(:disabled) {
-  background: #374151;
+  background: #22262f;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
+}
+
+button:active:not(:disabled) {
+  transform: scale(0.98);
 }
 
 button:disabled {
-  opacity: 0.4;
+  opacity: 0.35;
   cursor: not-allowed;
 }
 
 button.ghost {
   background: transparent;
-  color: #9ca3af;
-  font-weight: 400;
+  color: var(--muted);
+  font-weight: 500;
   margin-top: 4px;
+  box-shadow: none;
 }
 
 button.ghost:hover:not(:disabled) {
   background: transparent;
-  color: #6b7280;
+  color: var(--ink);
+  box-shadow: none;
+}
+
+.spinner {
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+  animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 #step-done {
@@ -123,26 +213,59 @@ button.ghost:hover:not(:disabled) {
 }
 
 .check {
-  width: 56px;
-  height: 56px;
+  width: 64px;
+  height: 64px;
   border-radius: 999px;
-  background: #111827;
-  color: #fff;
-  font-size: 24px;
+  background: linear-gradient(135deg, var(--gold-bright), var(--gold));
+  color: var(--ink);
   display: flex;
   align-items: center;
   justify-content: center;
   margin: 0 auto 24px;
+  box-shadow: 0 8px 24px rgba(212, 175, 55, 0.35);
+  animation: popIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+@keyframes popIn {
+  from { opacity: 0; transform: scale(0.6); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.check-circle {
+  stroke: var(--ink);
+  stroke-width: 0;
+}
+
+.check-mark {
+  stroke: var(--ink);
+  stroke-width: 4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 48;
+  stroke-dashoffset: 48;
+  animation: draw 0.4s 0.15s ease forwards;
+}
+
+@keyframes draw {
+  to { stroke-dashoffset: 0; }
 }
 
 #step-done h1 {
   font-size: 20px;
-  font-weight: 600;
+  font-weight: 700;
   margin: 0 0 8px;
 }
 
 #step-done p {
   font-size: 14px;
-  color: #6b7280;
+  color: var(--muted);
   margin: 0;
+  line-height: 1.5;
+}
+
+@media (max-width: 400px) {
+  .card {
+    padding: 28px 20px;
+    border-radius: 16px;
+  }
 }

@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="stylesheet" href="https://static.toss.im/tds/43.9.4/css/tds.min.css" />
+    <link rel="stylesheet" type="text/css" href="https://static.toss.im/tps/main.css" />
+    <link rel="stylesheet" type="text/css" href="https://static.toss.im/tps/others.css" />
+    <script src="https://cdn.tossplace.com/toss-front-sdk/v0/index.js"></script>
+    <script src="./sdk.js"></script>
+    <title>예약 - Toss Front Plugin</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script>
+      const CAR_NUMBER_RE = /^\d{2,3}[가-힣]\d{4}$/
+      const PHONE_RE = /^01[0-9]{8,9}$/
+
+      function showCarNumberInput(errorText) {
+        sdk.template.renderInputPage({
+          type: 'text',
+          top: {
+            title: '차량번호를 입력해주세요',
+            subtitle: errorText || '예) 12가3456',
+          },
+          input: {
+            placeholder: '12가3456',
+            maxLength: 8,
+          },
+          button: { label: '다음' },
+          onSubmit: async (value) => {
+            const carNumber = value.trim()
+            if (!CAR_NUMBER_RE.test(carNumber)) {
+              showCarNumberInput('차량번호 형식이 올바르지 않습니다. 예) 12가3456')
+              return
+            }
+            showPhoneInput(carNumber)
+          },
+          onBack: () => {
+            location.href = './index.html'
+          },
+        })
+      }
+
+      function showPhoneInput(carNumber, errorText) {
+        sdk.template.renderInputPage({
+          type: 'phone',
+          top: {
+            title: '전화번호를 입력해주세요',
+            subtitle: errorText || '순서가 되면 알림톡으로 안내드려요',
+          },
+          input: { placeholder: '전화번호 입력' },
+          button: { label: '예약 완료' },
+          onSubmit: async (value) => {
+            const phone = value.replace(/-/g, '').trim()
+            if (!PHONE_RE.test(phone)) {
+              showPhoneInput(carNumber, '전화번호 형식이 올바르지 않습니다.')
+              return
+            }
+            await submitReservation(carNumber, phone)
+          },
+          onBack: () => {
+            showCarNumberInput()
+          },
+        })
+      }
+
+      async function submitReservation(carNumber, phone) {
+        try {
+          const res = await fetch('/api/reservations', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ carNumber, phone }),
+          })
+          const json = await res.json().catch(() => ({}))
+
+          if (!res.ok || !json.ok) {
+            sdk.template.renderResultPage({
+              type: 'image',
+              status: 'error',
+              title: json.error || '예약 접수 중 오류가 발생했습니다.',
+              timerMs: 3000,
+              onTimeout: () => showCarNumberInput(),
+              localeCode: 'ko',
+            })
+            return
+          }
+
+          sdk.template.renderResultPage({
+            type: 'text',
+            text: `${json.queueNumber}번`,
+            title: '예약이 접수되었습니다',
+            description: '순서가 되면 알림톡으로 안내드려요',
+            timerMs: 5000,
+            onTimeout: () => {
+              location.href = './index.html'
+            },
+            localeCode: 'ko',
+          })
+        } catch (err) {
+          sdk.template.renderResultPage({
+            type: 'image',
+            status: 'error',
+            title: '네트워크 오류가 발생했습니다.',
+            timerMs: 3000,
+            onTimeout: () => showCarNumberInput(),
+            localeCode: 'ko',
+          })
+        }
+      }
+
+      showCarNumberInput()
+    </script>
+  </body>
+</html>

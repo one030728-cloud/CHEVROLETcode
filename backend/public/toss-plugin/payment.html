@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="stylesheet" href="https://static.toss.im/tds/43.9.4/css/tds.min.css" />
+    <link rel="stylesheet" type="text/css" href="https://static.toss.im/tps/main.css" />
+    <link rel="stylesheet" type="text/css" href="https://static.toss.im/tps/others.css" />
+    <script src="https://cdn.tossplace.com/toss-front-sdk/v0/index.js"></script>
+    <script src="./sdk.js"></script>
+    <title>결제 - Toss Front Plugin</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script>
+      const CAR_NUMBER_RE = /^\d{2,3}[가-힣]\d{4}$/
+      const PHONE_RE = /^01[0-9]{8,9}$/
+
+      // NOTE: 이 매장은 POS 주문 시스템이 따로 없어 결제금액을 직원이 단말기에서 직접 입력한다.
+      // 만약 나중에 주문/상품 시스템이 생기면 sdk.template.renderOrderPage 흐름(order.html 참고)으로 교체.
+      function showAmountInput(errorText) {
+        sdk.template.renderInputPage({
+          type: 'number',
+          top: {
+            title: '결제 금액을 입력해주세요',
+            subtitle: errorText || '원 단위',
+          },
+          input: { placeholder: '금액 입력' },
+          button: { label: '결제 진행' },
+          onSubmit: async (value) => {
+            const amount = Number(value)
+            if (!Number.isFinite(amount) || amount <= 0) {
+              showAmountInput('결제 금액이 올바르지 않습니다.')
+              return
+            }
+            await startPayment(amount)
+          },
+          onBack: () => {
+            location.href = './index.html'
+          },
+        })
+      }
+
+      async function startPayment(amount) {
+        const paymentKey = crypto.randomUUID()
+        const tax = Math.floor(amount / 11)
+        const supplyValue = amount - tax
+
+        try {
+          const result = await sdk.payment.requestPayment({
+            paymentKey,
+            tax,
+            supplyValue,
+            tip: 0,
+            timeoutMs: 60000,
+          })
+
+          if (result.type === 'CANCELED' || result.type === 'TIMEOUT') {
+            location.href = './index.html'
+            return
+          }
+
+          if (result.type !== 'SUCCESS') {
+            sdk.template.renderResultPage({
+              type: 'image',
+              status: 'error',
+              title: '결제에 실패했습니다.',
+              timerMs: 3000,
+              onTimeout: () => showAmountInput(),
+              localeCode: 'ko',
+            })
+            return
+          }
+
+          askCarNumber({ paymentKey, amount })
+        } catch (err) {
+          sdk.template.renderResultPage({
+            type: 'image',
+            status: 'error',
+            title: '결제 처리 중 오류가 발생했습니다.',
+            timerMs: 3000,
+            onTimeout: () => showAmountInput(),
+            localeCode: 'ko',
+          })
+        }
+      }
+
+      function askCarNumber({ paymentKey, amount }, errorText) {
+        sdk.template.renderInputPage({
+          type: 'text',
+          top: {
+            title: '차량번호를 입력해주세요',
+            // renderInputPage(text)는 입력값이 없으면 "다음" 버튼이 비활성화되어 빈 채로 제출할 수 없다.
+            // 차량번호는 선택 항목이므로, 입력하지 않으려면 뒤로가기로 건너뛰도록 안내한다.
+            subtitle: errorText || '입력하지 않으려면 뒤로가기를 눌러주세요',
+          },
+          input: { placeholder: '12가3456', maxLength: 8 },
+          button: { label: '다음' },
+          onSubmit: async (value) => {
+            const carNumber = value.trim()
+            if (carNumber && !CAR_NUMBER_RE.test(carNumber)) {
+              askCarNumber({ paymentKey, amount }, '차량번호 형식이 올바르지 않습니다.')
+              return
+            }
+            askPhoneForReceipt({ paymentKey, amount, carNumber })
+          },
+          onBack: () => {
+            askPhoneForReceipt({ paymentKey, amount })
+          },
+        })
+      }
+
+      function askPhoneForReceipt({ paymentKey, amount, carNumber }, errorText) {
+        sdk.template.renderInputPage({
+          type: 'phone',
+          top: {
+            title: '전자영수증을 받으실\n전화번호를 입력해주세요',
+            subtitle: errorText || '결제가 완료되었습니다',
+          },
+          input: { placeholder: '전화번호 입력' },
+          button: { label: '영수증 받기' },
+          onSubmit: async (value) => {
+            const phone = value.replace(/-/g, '').trim()
+            if (!PHONE_RE.test(phone)) {
+              askPhoneForReceipt({ paymentKey, amount, carNumber }, '전화번호 형식이 올바르지 않습니다.')
+              return
+            }
+            await submitPayment({ paymentKey, amount, carNumber, phone })
+          },
+          onBack: () => {
+            location.href = './index.html'
+          },
+        })
+      }
+
+      async function submitPayment({ paymentKey, amount, carNumber, phone }) {
+        try {
+          const res = await fetch('/api/payments', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ paymentKey, amount, carNumber, phone }),
+          })
+          const json = await res.json().catch(() => ({}))
+
+          sdk.template.renderResultPage({
+            type: 'text',
+            text: json.ok ? '영수증 발송 완료' : '영수증 발송 실패',
+            title: '결제가 완료되었습니다',
+            description: json.ok ? '알림톡을 확인해주세요' : '결제는 완료됐지만 영수증 발송에 실패했어요',
+            timerMs: 5000,
+            onTimeout: () => {
+              location.href = './index.html'
+            },
+            localeCode: 'ko',
+          })
+        } catch (err) {
+          sdk.template.renderResultPage({
+            type: 'image',
+            status: 'error',
+            title: '영수증 처리 중 오류가 발생했습니다.',
+            description: '결제는 이미 완료되었습니다.',
+            timerMs: 4000,
+            onTimeout: () => {
+              location.href = './index.html'
+            },
+            localeCode: 'ko',
+          })
+        }
+      }
+
+      showAmountInput()
+    </script>
+  </body>
+</html>
