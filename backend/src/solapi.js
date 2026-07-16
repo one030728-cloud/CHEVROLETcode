@@ -11,20 +11,19 @@ function getService() {
   return service
 }
 
-function kakaoOptions({ templateId, variables }) {
-  const pfId = process.env.SOLAPI_KAKAO_PFID
-  if (!pfId || !templateId) {
-    throw new Error(`알림톡 환경변수 누락: pfId=${!!pfId} templateId=${!!templateId}`)
-  }
-  return { pfId, templateId, variables, disableSms: true }
-}
-
+// 카카오 알림톡용 pfId/템플릿ID가 아직 없으면(템플릿 승인 전) 일반 문자(SMS/LMS)로 대신 보낸다.
+// 알림톡 템플릿이 승인되고 .env에 SOLAPI_KAKAO_PFID + 템플릿ID를 채우면 자동으로 알림톡으로 전환된다.
 async function sendAlimtalk({ phone, text, templateId, variables }) {
+  const pfId = process.env.SOLAPI_KAKAO_PFID
+  const useKakao = Boolean(pfId && templateId)
+
   const result = await getService().send({
     to: phone,
     from: process.env.SOLAPI_SENDER,
     text,
-    kakaoOptions: kakaoOptions({ templateId, variables }),
+    ...(useKakao
+      ? { kakaoOptions: { pfId, templateId, variables, disableSms: true } }
+      : {}),
   })
 
   const failed = result?.failedMessageList ?? result?.failed
@@ -33,6 +32,7 @@ async function sendAlimtalk({ phone, text, templateId, variables }) {
     const msg = firstErr?.resultMessage ?? firstErr?.statusMessage ?? firstErr?.reason ?? JSON.stringify(firstErr)
     throw new Error(msg)
   }
+  console.log(`[solapi] ${useKakao ? '알림톡' : '문자(SMS)'} 발송 성공: ${phone}`)
   return result
 }
 
