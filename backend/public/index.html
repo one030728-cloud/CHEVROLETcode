@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+<title>쉐보레 예약</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main class="wrap">
+    <div class="card">
+      <div class="header">
+        <h1 id="title">예약하기</h1>
+        <p id="subtitle">차량번호를 입력해주세요</p>
+      </div>
+
+      <div class="steps">
+        <span class="dot active" data-step="car"></span>
+        <span class="dot" data-step="phone"></span>
+      </div>
+
+      <section id="step-car" class="step">
+        <input id="carNumber" type="text" inputmode="text" placeholder="예) 12가3456" autofocus />
+        <p id="carError" class="error"></p>
+        <button id="toPhoneBtn" disabled>다음</button>
+      </section>
+
+      <section id="step-phone" class="step hidden">
+        <input id="phone" type="tel" inputmode="tel" placeholder="010-1234-5678" />
+        <p id="phoneError" class="error"></p>
+        <button id="submitBtn" disabled>예약 완료</button>
+        <button id="backBtn" class="ghost">이전으로</button>
+      </section>
+
+      <section id="step-done" class="step hidden">
+        <div class="check">✓</div>
+        <h1>예약이 접수되었습니다</h1>
+        <p>알림톡으로 안내드렸어요.</p>
+      </section>
+    </div>
+  </main>
+  <script src="reservation.js"></script>
+</body>
+</html>

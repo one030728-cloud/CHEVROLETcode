@@ -1,0 +1,148 @@
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Pretendard", "Malgun Gothic", sans-serif;
+  background: #ffffff;
+  color: #111827;
+}
+
+.wrap {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.card {
+  width: 100%;
+  max-width: 360px;
+}
+
+.header {
+  text-align: center;
+  margin-bottom: 32px;
+}
+
+.header h1 {
+  font-size: 20px;
+  font-weight: 600;
+  margin: 0 0 4px;
+}
+
+.header p {
+  font-size: 14px;
+  color: #6b7280;
+  margin: 0;
+}
+
+.steps {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 32px;
+}
+
+.dot {
+  height: 6px;
+  width: 40px;
+  border-radius: 999px;
+  background: #e5e7eb;
+}
+
+.dot.active {
+  background: #111827;
+}
+
+.step.hidden {
+  display: none;
+}
+
+input[type="text"], input[type="tel"] {
+  width: 100%;
+  padding: 14px 16px;
+  font-size: 18px;
+  text-align: center;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  outline: none;
+  margin-bottom: 12px;
+}
+
+input[type="text"]:focus, input[type="tel"]:focus {
+  border-color: #111827;
+  box-shadow: 0 0 0 2px rgba(17, 24, 39, 0.1);
+}
+
+.error {
+  color: #ef4444;
+  font-size: 13px;
+  text-align: center;
+  min-height: 18px;
+  margin: 0 0 8px;
+}
+
+button {
+  width: 100%;
+  padding: 14px;
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: 12px;
+  border: none;
+  cursor: pointer;
+  background: #111827;
+  color: #ffffff;
+  transition: background 0.15s;
+}
+
+button:hover:not(:disabled) {
+  background: #374151;
+}
+
+button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+button.ghost {
+  background: transparent;
+  color: #9ca3af;
+  font-weight: 400;
+  margin-top: 4px;
+}
+
+button.ghost:hover:not(:disabled) {
+  background: transparent;
+  color: #6b7280;
+}
+
+#step-done {
+  text-align: center;
+}
+
+.check {
+  width: 56px;
+  height: 56px;
+  border-radius: 999px;
+  background: #111827;
+  color: #fff;
+  font-size: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 24px;
+}
+
+#step-done h1 {
+  font-size: 20px;
+  font-weight: 600;
+  margin: 0 0 8px;
+}
+
+#step-done p {
+  font-size: 14px;
+  color: #6b7280;
+  margin: 0;
+}
