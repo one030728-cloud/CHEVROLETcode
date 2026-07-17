@@ -8,7 +8,10 @@ const {
   createReservation,
   listReservations,
   getNextWaitingReservation,
+  getReservation,
+  deleteReservation,
   markReservationCalled,
+  markReservationCompleted,
   createPayment,
   findPaymentByKey,
   listPayments,
@@ -83,8 +86,11 @@ async function notifyQueueTurn(reservation) {
 
 // --- 예약(대기순번) ---
 // 차량번호 + 전화번호를 등록하고 대기번호를 발급한다.
-// 접수 시점에 대기중인 손님이 없으면(앞에 아무도 없으면) 곧바로 "순서입니다" 알림톡을 보내고,
-// 대기중인 손님이 있으면 "몇 명 남았는지"를 안내하는 접수 알림톡을 보낸다.
+// "앞에 몇 명 있는지"는 status가 'completed'가 아닌(=아직 정비가 안 끝난) 예약 수로 센다.
+// 단순히 'waiting'만 세면, 이미 호출됐지만 아직 정비 중인 손님을 무시하고 계속 자동 호출이 발생한다
+// (정비 베이가 몇 개 비었는지는 모르니, 관리자가 /api/reservations/:id/complete로 "정비완료"를
+// 눌러줘야 그 손님이 앞에서 빠진다).
+// 앞에 아무도 없으면 곧바로 "순서입니다" 알림톡을 보내고, 있으면 "몇 명 남았는지"를 안내하는 접수 알림톡을 보낸다.
 app.post('/api/reservations', reservationLimiter, async (req, res) => {
   try {
     const carNumber = String(req.body?.carNumber ?? '').trim()
@@ -102,7 +108,7 @@ app.post('/api/reservations', reservationLimiter, async (req, res) => {
     }
     const serviceType = SERVICE_TYPES[serviceTypeKey]
 
-    const peopleAhead = listReservations().filter((r) => r.status === 'waiting').length
+    const peopleAhead = listReservations().filter((r) => r.status !== 'completed').length
     const reservation = createReservation({ carNumber, phone, serviceType })
 
     if (peopleAhead === 0) {
@@ -146,6 +152,41 @@ app.post('/api/queue/call-next', requireAdmin, async (req, res) => {
   await notifyQueueTurn(reservation)
 
   return res.json({ ok: true, id: reservation.id, queueNumber: reservation.queueNumber, status: reservation.status })
+})
+
+// 특정 예약을 대기열 순서와 무관하게 바로 호출한다 (관리자 전용).
+// 테스트로 만든 예약을 확인하거나, 예외적으로 순서를 건너뛰어야 할 때 쓴다.
+app.post('/api/reservations/:id/call', requireAdmin, async (req, res) => {
+  const reservation = getReservation(req.params.id)
+  if (!reservation) {
+    return res.status(404).json({ ok: false, error: '예약을 찾을 수 없습니다.' })
+  }
+  if (reservation.status !== 'waiting') {
+    return res.status(400).json({ ok: false, error: '대기중인 예약만 호출할 수 있습니다.' })
+  }
+
+  await notifyQueueTurn(reservation)
+
+  return res.json({ ok: true, id: reservation.id, queueNumber: reservation.queueNumber, status: reservation.status })
+})
+
+// 예약을 삭제한다 (관리자 전용). 테스트 데이터 정리나 손님 취소 처리용.
+app.delete('/api/reservations/:id', requireAdmin, (req, res) => {
+  const deleted = deleteReservation(req.params.id)
+  if (!deleted) {
+    return res.status(404).json({ ok: false, error: '예약을 찾을 수 없습니다.' })
+  }
+  return res.json({ ok: true })
+})
+
+// 정비가 끝났음을 표시한다 (관리자 전용). 이걸 눌러야 이 손님이 "앞에 있는 사람" 계산에서 빠져서
+// 다음 예약이 자동 호출되거나 대기인원 안내에서 한 명 줄어든다.
+app.post('/api/reservations/:id/complete', requireAdmin, (req, res) => {
+  const reservation = markReservationCompleted(req.params.id)
+  if (!reservation) {
+    return res.status(404).json({ ok: false, error: '예약을 찾을 수 없습니다.' })
+  }
+  return res.json({ ok: true, id: reservation.id, status: reservation.status })
 })
 
 // 예약 전체 목록 (관리자 화면용, 최신순).

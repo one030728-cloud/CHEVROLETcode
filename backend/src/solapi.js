@@ -36,8 +36,8 @@ async function sendAlimtalk({ phone, text, templateId, variables }) {
   return result
 }
 
-// 예약 접수 완료 (대기번호 발급). 이 시점에 이미 대기중인 손님이 있을 때만 호출된다
-// (대기중인 손님이 없으면 서버에서 바로 sendQueueTurnAlimtalk로 순서 호출을 보낸다).
+// 예약 접수 완료 (대기번호 발급). 이 시점에 앞서 정비완료 처리가 안 된 예약이 있을 때만 호출된다
+// (앞에 아무도 없으면 서버에서 바로 sendQueueTurnAlimtalk로 순서 호출을 보낸다).
 async function sendReservationAlimtalk({ phone, carNumber, queueNumber, peopleAhead, serviceType }) {
   return sendAlimtalk({
     phone,

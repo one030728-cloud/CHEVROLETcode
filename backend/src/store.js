@@ -28,9 +28,10 @@ function createReservation({ carNumber, phone, serviceType }) {
     phone,
     serviceType,
     queueNumber: nextQueueNumber(),
-    status: 'waiting', // waiting -> called (알림톡 발송 완료) / notify_failed
+    status: 'waiting', // waiting -> called(알림톡 발송 완료)/notify_failed -> completed(정비완료, 관리자가 직접 처리)
     createdAt: new Date().toISOString(),
     calledAt: null,
+    completedAt: null,
   }
   reservations.push(reservation)
   return reservation
@@ -44,11 +45,32 @@ function getNextWaitingReservation() {
   return reservations.find((r) => r.status === 'waiting') ?? null
 }
 
+function getReservation(id) {
+  return reservations.find((r) => r.id === id) ?? null
+}
+
+function deleteReservation(id) {
+  const index = reservations.findIndex((r) => r.id === id)
+  if (index === -1) return false
+  reservations.splice(index, 1)
+  return true
+}
+
 function markReservationCalled(id) {
   const reservation = reservations.find((r) => r.id === id)
   if (!reservation) return null
   reservation.status = 'called'
   reservation.calledAt = new Date().toISOString()
+  return reservation
+}
+
+// 정비가 끝나 정비 베이(자리)가 비었다는 뜻. 관리자가 직접 처리해야 한다 — 알림톡 발송 성공/실패와는
+// 별개로, 이걸 눌러야 다음 예약이 "앞에 아무도 없음"으로 계산되어 자동 호출되거나 대기인원이 줄어든다.
+function markReservationCompleted(id) {
+  const reservation = reservations.find((r) => r.id === id)
+  if (!reservation) return null
+  reservation.status = 'completed'
+  reservation.completedAt = new Date().toISOString()
   return reservation
 }
 
@@ -98,7 +120,10 @@ module.exports = {
   createReservation,
   listReservations,
   getNextWaitingReservation,
+  getReservation,
+  deleteReservation,
   markReservationCalled,
+  markReservationCompleted,
   createPayment,
   findPaymentByKey,
   listPayments,

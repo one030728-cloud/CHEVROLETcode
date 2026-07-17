@@ -134,8 +134,25 @@
   .badge.waiting { background: var(--blue-tint); color: var(--blue); }
   .badge.called, .badge.receipt_sent { background: #e7f9f1; color: var(--green); }
   .badge.notify_failed, .badge.receipt_failed { background: #fdeeef; color: var(--error); }
+  .badge.completed { background: var(--surface); color: var(--ink); }
   .badge.requested { background: var(--surface); color: var(--muted); }
   .empty { padding: 40px 12px; text-align: center; color: var(--muted); font-size: 14px; }
+  .row-actions { display: flex; gap: 6px; }
+  .row-btn {
+    padding: 6px 10px;
+    font-size: 12px;
+    font-weight: 700;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: #fff;
+    color: var(--ink);
+    cursor: pointer;
+  }
+  .row-btn.call { color: var(--blue); border-color: var(--blue-tint); background: var(--blue-tint); }
+  .row-btn.complete { color: var(--green); border-color: #e7f9f1; background: #e7f9f1; }
+  .row-btn.call:disabled, .row-btn.complete:disabled { color: #b0b8c1; border-color: var(--border); background: var(--surface); cursor: not-allowed; }
+  .row-btn.del { color: var(--error); }
+  .row-btn:hover:not(:disabled) { filter: brightness(0.96); }
   .refresh-note { font-size: 12px; color: var(--muted); margin: 10px 2px 0; }
   .testform {
     background: #fff;
@@ -223,6 +240,7 @@ const STATUS_LABEL = {
   waiting: '대기중',
   called: '호출완료',
   notify_failed: '알림실패',
+  completed: '정비완료',
   requested: '결제접수',
   receipt_sent: '영수증발송',
   receipt_failed: '영수증실패',
@@ -278,8 +296,8 @@ async function api(path) {
   return res.json()
 }
 
-async function apiPost(path) {
-  const res = await fetch(path, { method: 'POST', headers: { 'x-admin-token': token } })
+async function apiPost(path, method = 'POST') {
+  const res = await fetch(path, { method, headers: { 'x-admin-token': token } })
   const body = await res.json().catch(() => ({}))
   if (res.status === 401) throw new Error('UNAUTHORIZED')
   return { ok: res.ok, status: res.status, body }
@@ -340,6 +358,65 @@ document.querySelectorAll('.tab').forEach((tab) => {
   })
 })
 
+document.getElementById('reservations-view').addEventListener('click', async (e) => {
+  const btn = e.target.closest('.row-btn')
+  if (!btn || btn.disabled) return
+  const id = btn.dataset.id
+
+  if (btn.classList.contains('call')) {
+    btn.disabled = true
+    btn.textContent = '호출중...'
+    try {
+      const { ok, body } = await apiPost(`/api/reservations/${id}/call`)
+      if (!ok) alert(body.error || '호출에 실패했습니다.')
+    } catch (err) {
+      if (err.message === 'UNAUTHORIZED') {
+        sessionStorage.removeItem('admin_token')
+        showLogin('토큰이 만료되었거나 올바르지 않습니다.')
+        return
+      }
+      alert('호출 중 오류가 발생했습니다.')
+    }
+    await loadAll()
+    return
+  }
+
+  if (btn.classList.contains('complete')) {
+    btn.disabled = true
+    btn.textContent = '처리중...'
+    try {
+      const { ok, body } = await apiPost(`/api/reservations/${id}/complete`)
+      if (!ok) alert(body.error || '처리에 실패했습니다.')
+    } catch (err) {
+      if (err.message === 'UNAUTHORIZED') {
+        sessionStorage.removeItem('admin_token')
+        showLogin('토큰이 만료되었거나 올바르지 않습니다.')
+        return
+      }
+      alert('처리 중 오류가 발생했습니다.')
+    }
+    await loadAll()
+    return
+  }
+
+  if (btn.classList.contains('del')) {
+    if (!confirm('이 예약을 삭제할까요?')) return
+    btn.disabled = true
+    try {
+      const { ok, body } = await apiPost(`/api/reservations/${id}`, 'DELETE')
+      if (!ok) alert(body.error || '삭제에 실패했습니다.')
+    } catch (err) {
+      if (err.message === 'UNAUTHORIZED') {
+        sessionStorage.removeItem('admin_token')
+        showLogin('토큰이 만료되었거나 올바르지 않습니다.')
+        return
+      }
+      alert('삭제 중 오류가 발생했습니다.')
+    }
+    await loadAll()
+  }
+})
+
 function renderReservations(list) {
   const view = document.getElementById('reservations-view')
   document.getElementById('count-res').textContent = list.length
@@ -355,10 +432,15 @@ function renderReservations(list) {
       <td>${escapeHtml(r.phone)}</td>
       <td><span class="badge ${r.status}">${STATUS_LABEL[r.status] || r.status}</span></td>
       <td>${fmtDate(r.createdAt)}</td>
+      <td class="row-actions">
+        <button class="row-btn call" data-id="${r.id}" ${r.status !== 'waiting' ? 'disabled' : ''}>호출</button>
+        <button class="row-btn complete" data-id="${r.id}" ${r.status !== 'called' && r.status !== 'notify_failed' ? 'disabled' : ''}>완료</button>
+        <button class="row-btn del" data-id="${r.id}">삭제</button>
+      </td>
     </tr>
   `).join('')
   view.innerHTML = `<table>
-    <thead><tr><th>순번</th><th>차량번호</th><th>정비항목</th><th>전화번호</th><th>상태</th><th>접수시간</th></tr></thead>
+    <thead><tr><th>순번</th><th>차량번호</th><th>정비항목</th><th>전화번호</th><th>상태</th><th>접수시간</th><th>동작</th></tr></thead>
     <tbody>${rows}</tbody>
   </table>`
 }
