@@ -99,6 +99,12 @@ app.post('/api/queue/call-next', requireAdmin, async (req, res) => {
   return res.json({ ok: true, id: reservation.id, queueNumber: reservation.queueNumber, status: reservation.status })
 })
 
+// 예약 전체 목록 (관리자 화면용, 최신순).
+app.get('/api/reservations', requireAdmin, (req, res) => {
+  const all = [...listReservations()].reverse()
+  return res.json({ ok: true, count: all.length, reservations: all })
+})
+
 // 알림톡 발송 실패 건 확인용 (임시).
 app.get('/api/reservations/failed', requireAdmin, (req, res) => {
   const failed = listReservations().filter((r) => r.status === 'notify_failed')
@@ -150,6 +156,12 @@ app.post('/api/payments', paymentLimiter, async (req, res) => {
     console.error('payment error:', e)
     return res.status(500).json({ ok: false, error: e.message })
   }
+})
+
+// 결제 전체 목록 (관리자 화면용, 최신순).
+app.get('/api/payments', requireAdmin, (req, res) => {
+  const all = [...listPayments()].reverse()
+  return res.json({ ok: true, count: all.length, payments: all })
 })
 
 app.get('/api/payments/failed', requireAdmin, (req, res) => {
