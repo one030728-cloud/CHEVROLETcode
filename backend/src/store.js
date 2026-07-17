@@ -21,11 +21,12 @@ function nextQueueNumber() {
   return dailyQueueCounter
 }
 
-function createReservation({ carNumber, phone }) {
+function createReservation({ carNumber, phone, serviceType }) {
   const reservation = {
     id: randomUUID(),
     carNumber,
     phone,
+    serviceType,
     queueNumber: nextQueueNumber(),
     status: 'waiting', // waiting -> called (알림톡 발송 완료) / notify_failed
     createdAt: new Date().toISOString(),

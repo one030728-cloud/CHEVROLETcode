@@ -23,6 +23,16 @@
       const CAR_NUMBER_RE = /^\d{2,3}[가-힣]\d{4}$/
       const PHONE_RE = /^01[0-9]{8,9}$/
 
+      // 서버(server.js)의 SERVICE_TYPES와 키/순서를 맞춰야 한다.
+      const SERVICE_TYPES = [
+        { value: 'oil', title: '엔진오일 교체' },
+        { value: 'inspection', title: '정기점검' },
+        { value: 'tire', title: '타이어 교체·펑크수리' },
+        { value: 'battery', title: '배터리 교체' },
+        { value: 'brake', title: '브레이크 정비' },
+        { value: 'etc', title: '기타 수리·상담' },
+      ]
+
       function showCarNumberInput(errorText) {
         sdk.template.renderInputPage({
           type: 'text',
@@ -41,7 +51,7 @@
               showCarNumberInput('차량번호 형식이 올바르지 않습니다. 예) 12가3456')
               return
             }
-            showPhoneInput(carNumber)
+            showServiceTypeSelect(carNumber)
           },
           onBack: () => {
             location.href = './index.html'
@@ -49,7 +59,21 @@
         })
       }
 
-      function showPhoneInput(carNumber, errorText) {
+      function showServiceTypeSelect(carNumber) {
+        sdk.template.renderSelectPage({
+          title: '어떤 정비가 필요하신가요?',
+          subtitle: '차량번호 ' + carNumber,
+          options: SERVICE_TYPES.map((service) => ({
+            title: service.title,
+            onClick: () => showPhoneInput(carNumber, service.value),
+          })),
+          onBack: () => {
+            showCarNumberInput()
+          },
+        })
+      }
+
+      function showPhoneInput(carNumber, serviceType, errorText) {
         sdk.template.renderInputPage({
           type: 'phone',
           top: {
@@ -61,23 +85,23 @@
           onSubmit: async (value) => {
             const phone = value.replace(/-/g, '').trim()
             if (!PHONE_RE.test(phone)) {
-              showPhoneInput(carNumber, '전화번호 형식이 올바르지 않습니다.')
+              showPhoneInput(carNumber, serviceType, '전화번호 형식이 올바르지 않습니다.')
               return
             }
-            await submitReservation(carNumber, phone)
+            await submitReservation(carNumber, phone, serviceType)
           },
           onBack: () => {
-            showCarNumberInput()
+            showServiceTypeSelect(carNumber)
           },
         })
       }
 
-      async function submitReservation(carNumber, phone) {
+      async function submitReservation(carNumber, phone, serviceType) {
         try {
           const res = await fetch(`${API_BASE}/api/reservations`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ carNumber, phone }),
+            body: JSON.stringify({ carNumber, phone, serviceType }),
           })
           const json = await res.json().catch(() => ({}))
 
@@ -97,7 +121,7 @@
             type: 'text',
             text: `${json.queueNumber}번`,
             title: '예약이 접수되었습니다',
-            description: '순서가 되면 알림톡으로 안내드려요',
+            description: `${json.serviceType || ''} · 순서가 되면 알림톡으로 안내드려요`,
             timerMs: 5000,
             onTimeout: () => {
               location.href = './index.html'

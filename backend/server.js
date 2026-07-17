@@ -30,6 +30,16 @@ app.use(express.static(path.join(__dirname, 'public')))
 const CAR_NUMBER_RE = /^\d{2,3}[가-힣]\d{4}$/
 const PHONE_RE = /^01[0-9]{8,9}$/
 
+// 정비 항목 선택지. 토스프론트 플러그인의 reservation.html 선택 화면과 키/순서를 맞춰야 한다.
+const SERVICE_TYPES = {
+  oil: '엔진오일 교체',
+  inspection: '정기점검',
+  tire: '타이어 교체·펑크수리',
+  battery: '배터리 교체',
+  brake: '브레이크 정비',
+  etc: '기타 수리·상담',
+}
+
 function requireAdmin(req, res, next) {
   const token = process.env.ADMIN_TOKEN
   if (!token || req.get('x-admin-token') !== token) {
@@ -63,6 +73,7 @@ async function notifyQueueTurn(reservation) {
       phone: reservation.phone,
       carNumber: reservation.carNumber,
       queueNumber: reservation.queueNumber,
+      serviceType: reservation.serviceType,
     })
   } catch (notifyError) {
     console.error(`순서 알림톡 발송 실패 [예약 id=${reservation.id}]:`, notifyError.message)
@@ -78,6 +89,7 @@ app.post('/api/reservations', reservationLimiter, async (req, res) => {
   try {
     const carNumber = String(req.body?.carNumber ?? '').trim()
     const phone = String(req.body?.phone ?? '').replace(/-/g, '').trim()
+    const serviceTypeKey = String(req.body?.serviceType ?? '').trim()
 
     if (!CAR_NUMBER_RE.test(carNumber)) {
       return res.status(400).json({ ok: false, error: '차량번호 형식이 올바르지 않습니다. 예) 12가3456' })
@@ -85,9 +97,13 @@ app.post('/api/reservations', reservationLimiter, async (req, res) => {
     if (!PHONE_RE.test(phone)) {
       return res.status(400).json({ ok: false, error: '전화번호 형식이 올바르지 않습니다.' })
     }
+    if (!SERVICE_TYPES[serviceTypeKey]) {
+      return res.status(400).json({ ok: false, error: '정비 항목을 선택해주세요.' })
+    }
+    const serviceType = SERVICE_TYPES[serviceTypeKey]
 
     const peopleAhead = listReservations().filter((r) => r.status === 'waiting').length
-    const reservation = createReservation({ carNumber, phone })
+    const reservation = createReservation({ carNumber, phone, serviceType })
 
     if (peopleAhead === 0) {
       await notifyQueueTurn(reservation)
@@ -98,6 +114,7 @@ app.post('/api/reservations', reservationLimiter, async (req, res) => {
           carNumber,
           queueNumber: reservation.queueNumber,
           peopleAhead,
+          serviceType,
         })
       } catch (notifyError) {
         console.error(`예약 접수 알림 발송 실패 [예약 id=${reservation.id}]:`, notifyError.message)
@@ -110,6 +127,7 @@ app.post('/api/reservations', reservationLimiter, async (req, res) => {
       id: reservation.id,
       queueNumber: reservation.queueNumber,
       peopleAhead,
+      serviceType: reservation.serviceType,
       status: reservation.status,
     })
   } catch (e) {

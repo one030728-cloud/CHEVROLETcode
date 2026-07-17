@@ -38,29 +38,31 @@ async function sendAlimtalk({ phone, text, templateId, variables }) {
 
 // 예약 접수 완료 (대기번호 발급). 이 시점에 이미 대기중인 손님이 있을 때만 호출된다
 // (대기중인 손님이 없으면 서버에서 바로 sendQueueTurnAlimtalk로 순서 호출을 보낸다).
-async function sendReservationAlimtalk({ phone, carNumber, queueNumber, peopleAhead }) {
+async function sendReservationAlimtalk({ phone, carNumber, queueNumber, peopleAhead, serviceType }) {
   return sendAlimtalk({
     phone,
-    text: `[예약 접수]\n차량번호 ${carNumber}로 예약이 접수되었습니다.\n대기번호 ${queueNumber}번, 앞으로 ${peopleAhead}명 남았습니다.`,
+    text: `[예약 접수]\n차량번호 ${carNumber} · ${serviceType} 예약이 접수되었습니다.\n대기번호 ${queueNumber}번, 앞으로 ${peopleAhead}명 남았습니다.`,
     templateId: process.env.SOLAPI_KAKAO_TEMPLATE_RESERVATION,
     variables: {
       '#{차량번호}': carNumber,
       '#{전화번호}': phone,
       '#{대기번호}': String(queueNumber),
       '#{대기인원}': String(peopleAhead),
+      '#{정비항목}': serviceType,
     },
   })
 }
 
 // 순서가 되어 고객을 호출할 때
-async function sendQueueTurnAlimtalk({ phone, carNumber, queueNumber }) {
+async function sendQueueTurnAlimtalk({ phone, carNumber, queueNumber, serviceType }) {
   return sendAlimtalk({
     phone,
-    text: `[순서 안내]\n${queueNumber}번, 고객님의 순서입니다. (차량번호 ${carNumber})`,
+    text: `[순서 안내]\n${queueNumber}번, 고객님의 순서입니다. (차량번호 ${carNumber} · ${serviceType})`,
     templateId: process.env.SOLAPI_KAKAO_TEMPLATE_QUEUE_TURN,
     variables: {
       '#{차량번호}': carNumber,
       '#{대기번호}': String(queueNumber),
+      '#{정비항목}': serviceType,
     },
   })
 }
