@@ -20,7 +20,6 @@
       const API_BASE = /^(localhost|127\.0\.0\.1|chevroletcode\.onrender\.com)$/.test(location.hostname)
         ? ''
         : 'https://chevroletcode.onrender.com'
-      const CAR_NUMBER_RE = /^\d{2,3}[가-힣]\d{4}$/
       const PHONE_RE = /^01[0-9]{8,9}$/
 
       // NOTE: 이 매장은 POS 주문 시스템이 따로 없어 결제금액을 직원이 단말기에서 직접 입력한다.
@@ -79,7 +78,7 @@
             return
           }
 
-          askCarNumber({ paymentKey, amount })
+          askPhoneForReceipt({ paymentKey, amount })
         } catch (err) {
           sdk.template.renderResultPage({
             type: 'image',
@@ -92,32 +91,9 @@
         }
       }
 
-      function askCarNumber({ paymentKey, amount }, errorText) {
-        sdk.template.renderInputPage({
-          type: 'text',
-          top: {
-            title: '차량번호를 입력해주세요',
-            // renderInputPage(text)는 입력값이 없으면 "다음" 버튼이 비활성화되어 빈 채로 제출할 수 없다.
-            // 차량번호는 선택 항목이므로, 입력하지 않으려면 뒤로가기로 건너뛰도록 안내한다.
-            subtitle: errorText || '입력하지 않으려면 뒤로가기를 눌러주세요',
-          },
-          input: { placeholder: '12가3456', maxLength: 8 },
-          button: { label: '다음' },
-          onSubmit: async (value) => {
-            const carNumber = value.trim()
-            if (carNumber && !CAR_NUMBER_RE.test(carNumber)) {
-              askCarNumber({ paymentKey, amount }, '차량번호 형식이 올바르지 않습니다.')
-              return
-            }
-            askPhoneForReceipt({ paymentKey, amount, carNumber })
-          },
-          onBack: () => {
-            askPhoneForReceipt({ paymentKey, amount })
-          },
-        })
-      }
-
-      function askPhoneForReceipt({ paymentKey, amount, carNumber }, errorText) {
+      // 차량번호는 여기서 다시 입력받지 않는다. 전화번호만 받으면 서버가 그 번호로 등록된
+      // 예약 기록(차량번호+정비항목)을 찾아 영수증에 그대로 넣어준다 (submitPayment 참고).
+      function askPhoneForReceipt({ paymentKey, amount }, errorText) {
         sdk.template.renderInputPage({
           type: 'phone',
           top: {
@@ -129,10 +105,10 @@
           onSubmit: async (value) => {
             const phone = value.replace(/-/g, '').trim()
             if (!PHONE_RE.test(phone)) {
-              askPhoneForReceipt({ paymentKey, amount, carNumber }, '전화번호 형식이 올바르지 않습니다.')
+              askPhoneForReceipt({ paymentKey, amount }, '전화번호 형식이 올바르지 않습니다.')
               return
             }
-            await submitPayment({ paymentKey, amount, carNumber, phone })
+            await submitPayment({ paymentKey, amount, phone })
           },
           onBack: () => {
             location.href = './index.html'
@@ -140,20 +116,24 @@
         })
       }
 
-      async function submitPayment({ paymentKey, amount, carNumber, phone }) {
+      async function submitPayment({ paymentKey, amount, phone }) {
         try {
           const res = await fetch(`${API_BASE}/api/payments`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ paymentKey, amount, carNumber, phone }),
+            body: JSON.stringify({ paymentKey, amount, phone }),
           })
           const json = await res.json().catch(() => ({}))
+
+          const matched = [json.carNumber, json.serviceType].filter(Boolean).join(' · ')
 
           sdk.template.renderResultPage({
             type: 'text',
             text: json.ok ? '영수증 발송 완료' : '영수증 발송 실패',
             title: '결제가 완료되었습니다',
-            description: json.ok ? '알림톡을 확인해주세요' : '결제는 완료됐지만 영수증 발송에 실패했어요',
+            description: json.ok
+              ? (matched ? `${matched} · 알림톡을 확인해주세요` : '알림톡을 확인해주세요')
+              : '결제는 완료됐지만 영수증 발송에 실패했어요',
             timerMs: 5000,
             onTimeout: () => {
               location.href = './index.html'

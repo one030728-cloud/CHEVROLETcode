@@ -67,15 +67,17 @@ async function sendQueueTurnAlimtalk({ phone, carNumber, queueNumber, serviceTyp
   })
 }
 
-// 결제 완료 전자영수증
-async function sendReceiptAlimtalk({ phone, carNumber, amount }) {
+// 결제 완료 전자영수증. carNumber/serviceType은 결제 화면에서 다시 입력받는 게 아니라
+// 전화번호로 찾은 예약 기록에서 가져온 값이라 없을 수도 있다(예약 없이 바로 결제한 손님).
+async function sendReceiptAlimtalk({ phone, carNumber, serviceType, amount }) {
   const amountText = amount != null ? `${Number(amount).toLocaleString('ko-KR')}원` : ''
   return sendAlimtalk({
     phone,
-    text: `[전자영수증]\n결제가 완료되었습니다.${carNumber ? `\n차량번호 ${carNumber}` : ''}${amountText ? `\n결제금액 ${amountText}` : ''}`,
+    text: `[전자영수증]\n결제가 완료되었습니다.${carNumber ? `\n차량번호 ${carNumber}` : ''}${serviceType ? `\n정비항목 ${serviceType}` : ''}${amountText ? `\n결제금액 ${amountText}` : ''}`,
     templateId: process.env.SOLAPI_KAKAO_TEMPLATE_RECEIPT,
     variables: {
       '#{차량번호}': carNumber || '',
+      '#{정비항목}': serviceType || '',
       '#{결제금액}': amountText,
     },
   })

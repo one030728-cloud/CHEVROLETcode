@@ -74,6 +74,18 @@ function markReservationCompleted(id) {
   return reservation
 }
 
+// 결제 화면에서 차량번호를 다시 입력받는 대신, 전화번호로 이 손님의 예약 기록을 찾아
+// 차량번호/정비항목을 그대로 가져다 쓴다. 오늘 등록한 예약을 우선하고(같은 날 재방문 등으로
+// 여러 건이 있어도 최신 것 사용), 오늘 것이 없으면 그 번호로 등록된 가장 최근 예약을 쓴다.
+function findLatestReservationByPhone(phone) {
+  const matches = reservations.filter((r) => r.phone === phone)
+  if (!matches.length) return null
+  const today = new Date().toISOString().slice(0, 10)
+  const todayMatches = matches.filter((r) => r.createdAt.slice(0, 10) === today)
+  const pool = todayMatches.length ? todayMatches : matches
+  return pool[pool.length - 1]
+}
+
 const THREE_MONTHS_MS = 90 * 24 * 60 * 60 * 1000
 
 function findPaymentByKey(paymentKey) {
@@ -81,12 +93,13 @@ function findPaymentByKey(paymentKey) {
   return payments.find((p) => p.paymentKey === paymentKey) ?? null
 }
 
-function createPayment({ paymentKey, carNumber, phone, amount }) {
+function createPayment({ paymentKey, carNumber, serviceType, phone, amount }) {
   const now = new Date()
   const payment = {
     id: randomUUID(),
     paymentKey: paymentKey || null,
     carNumber: carNumber || null,
+    serviceType: serviceType || null,
     phone,
     amount: amount ?? null,
     status: 'requested', // requested -> receipt_sent / receipt_failed
@@ -124,6 +137,7 @@ module.exports = {
   deleteReservation,
   markReservationCalled,
   markReservationCompleted,
+  findLatestReservationByPhone,
   createPayment,
   findPaymentByKey,
   listPayments,

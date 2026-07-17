@@ -12,6 +12,7 @@ const {
   deleteReservation,
   markReservationCalled,
   markReservationCompleted,
+  findLatestReservationByPhone,
   createPayment,
   findPaymentByKey,
   listPayments,
@@ -227,13 +228,25 @@ app.post('/api/payments', paymentLimiter, async (req, res) => {
 
     const existing = findPaymentByKey(paymentKey)
     if (existing) {
-      return res.json({ ok: true, id: existing.id })
+      return res.json({ ok: true, id: existing.id, carNumber: existing.carNumber, serviceType: existing.serviceType })
     }
 
-    const payment = createPayment({ paymentKey, carNumber: carNumberRaw || null, phone, amount })
+    // 결제 화면에서 차량번호를 다시 입력받는 대신, 전화번호로 이 손님의 예약 기록을 찾아
+    // 차량번호/정비항목을 그대로 가져다 쓴다. 예약 없이 바로 결제하는 손님(연결된 예약이 없는 경우)만
+    // 클라이언트가 보낸 carNumber를 fallback으로 쓴다.
+    const linkedReservation = findLatestReservationByPhone(phone)
+    const carNumber = linkedReservation?.carNumber || carNumberRaw || null
+    const serviceType = linkedReservation?.serviceType || null
+
+    const payment = createPayment({ paymentKey, carNumber, serviceType, phone, amount })
 
     try {
-      await sendReceiptAlimtalk({ phone, carNumber: payment.carNumber, amount: payment.amount })
+      await sendReceiptAlimtalk({
+        phone,
+        carNumber: payment.carNumber,
+        serviceType: payment.serviceType,
+        amount: payment.amount,
+      })
       payment.status = 'receipt_sent'
     } catch (notifyError) {
       console.error(`전자영수증 발송 실패 [결제 id=${payment.id}]:`, notifyError.message)
@@ -241,7 +254,7 @@ app.post('/api/payments', paymentLimiter, async (req, res) => {
       // 영수증 발송에 실패해도 결제/DB 적재 자체는 성공으로 처리한다
     }
 
-    return res.json({ ok: true, id: payment.id })
+    return res.json({ ok: true, id: payment.id, carNumber: payment.carNumber, serviceType: payment.serviceType })
   } catch (e) {
     console.error('payment error:', e)
     return res.status(500).json({ ok: false, error: e.message })
