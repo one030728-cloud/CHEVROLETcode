@@ -16,6 +16,7 @@ const {
   markPromoSent,
 } = require('./src/store')
 const {
+  sendReservationAlimtalk,
   sendQueueTurnAlimtalk,
   sendReceiptAlimtalk,
   sendPromoAlimtalk,
@@ -53,9 +54,26 @@ const paymentLimiter = rateLimit({
   message: { ok: false, error: '요청이 너무 많습니다. 잠시 후 다시 시도해주세요.' },
 })
 
+// 대기중인 예약을 호출 처리하고 "순서입니다" 알림톡을 보낸다.
+// /api/queue/call-next(관리자가 수동 호출)와 예약 접수 시 대기인원이 0명이라 바로 호출되는 경우 둘 다에서 쓴다.
+async function notifyQueueTurn(reservation) {
+  markReservationCalled(reservation.id)
+  try {
+    await sendQueueTurnAlimtalk({
+      phone: reservation.phone,
+      carNumber: reservation.carNumber,
+      queueNumber: reservation.queueNumber,
+    })
+  } catch (notifyError) {
+    console.error(`순서 알림톡 발송 실패 [예약 id=${reservation.id}]:`, notifyError.message)
+    reservation.status = 'notify_failed'
+  }
+}
+
 // --- 예약(대기순번) ---
 // 차량번호 + 전화번호를 등록하고 대기번호를 발급한다.
-// 알림톡은 여기서 바로 보내지 않고, 매장에서 순서를 호출할 때(/api/queue/call-next) 발송한다.
+// 접수 시점에 대기중인 손님이 없으면(앞에 아무도 없으면) 곧바로 "순서입니다" 알림톡을 보내고,
+// 대기중인 손님이 있으면 "몇 명 남았는지"를 안내하는 접수 알림톡을 보낸다.
 app.post('/api/reservations', reservationLimiter, async (req, res) => {
   try {
     const carNumber = String(req.body?.carNumber ?? '').trim()
@@ -68,8 +86,32 @@ app.post('/api/reservations', reservationLimiter, async (req, res) => {
       return res.status(400).json({ ok: false, error: '전화번호 형식이 올바르지 않습니다.' })
     }
 
+    const peopleAhead = listReservations().filter((r) => r.status === 'waiting').length
     const reservation = createReservation({ carNumber, phone })
-    return res.json({ ok: true, id: reservation.id, queueNumber: reservation.queueNumber })
+
+    if (peopleAhead === 0) {
+      await notifyQueueTurn(reservation)
+    } else {
+      try {
+        await sendReservationAlimtalk({
+          phone,
+          carNumber,
+          queueNumber: reservation.queueNumber,
+          peopleAhead,
+        })
+      } catch (notifyError) {
+        console.error(`예약 접수 알림 발송 실패 [예약 id=${reservation.id}]:`, notifyError.message)
+        // 접수 안내 알림 발송에 실패해도 손님은 여전히 대기중이므로 status는 바꾸지 않는다.
+      }
+    }
+
+    return res.json({
+      ok: true,
+      id: reservation.id,
+      queueNumber: reservation.queueNumber,
+      peopleAhead,
+      status: reservation.status,
+    })
   } catch (e) {
     console.error('reservation error:', e)
     return res.status(500).json({ ok: false, error: e.message })
@@ -83,18 +125,7 @@ app.post('/api/queue/call-next', requireAdmin, async (req, res) => {
     return res.status(404).json({ ok: false, error: '대기중인 예약이 없습니다.' })
   }
 
-  markReservationCalled(reservation.id)
-
-  try {
-    await sendQueueTurnAlimtalk({
-      phone: reservation.phone,
-      carNumber: reservation.carNumber,
-      queueNumber: reservation.queueNumber,
-    })
-  } catch (notifyError) {
-    console.error(`순서 알림톡 발송 실패 [예약 id=${reservation.id}]:`, notifyError.message)
-    reservation.status = 'notify_failed'
-  }
+  await notifyQueueTurn(reservation)
 
   return res.json({ ok: true, id: reservation.id, queueNumber: reservation.queueNumber, status: reservation.status })
 })

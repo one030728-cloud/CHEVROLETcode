@@ -36,16 +36,18 @@ async function sendAlimtalk({ phone, text, templateId, variables }) {
   return result
 }
 
-// 예약 접수 완료 (대기번호 발급)
-async function sendReservationAlimtalk({ phone, carNumber, queueNumber }) {
+// 예약 접수 완료 (대기번호 발급). 이 시점에 이미 대기중인 손님이 있을 때만 호출된다
+// (대기중인 손님이 없으면 서버에서 바로 sendQueueTurnAlimtalk로 순서 호출을 보낸다).
+async function sendReservationAlimtalk({ phone, carNumber, queueNumber, peopleAhead }) {
   return sendAlimtalk({
     phone,
-    text: `[예약 접수]\n차량번호 ${carNumber}로 예약이 접수되었습니다. 대기번호 ${queueNumber}번`,
+    text: `[예약 접수]\n차량번호 ${carNumber}로 예약이 접수되었습니다.\n대기번호 ${queueNumber}번, 앞으로 ${peopleAhead}명 남았습니다.`,
     templateId: process.env.SOLAPI_KAKAO_TEMPLATE_RESERVATION,
     variables: {
       '#{차량번호}': carNumber,
       '#{전화번호}': phone,
       '#{대기번호}': String(queueNumber),
+      '#{대기인원}': String(peopleAhead),
     },
   })
 }
