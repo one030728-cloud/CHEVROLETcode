@@ -1,0 +1,124 @@
+{
+  "version": "3.0",
+  "lastUpdated": "2026-07-30T02:57:35.326Z",
+  "activeFeatures": [
+    "multi-store-support"
+  ],
+  "primaryFeature": "multi-store-support",
+  "features": {
+    "multi-store-support": {
+      "phase": "check",
+      "phaseNumber": 4,
+      "matchRate": 100,
+      "iterationCount": 0,
+      "requirements": [],
+      "documents": {},
+      "timestamps": {
+        "started": "2026-07-30T02:13:44.288Z",
+        "lastUpdated": "2026-07-30T02:57:35.324Z"
+      }
+    }
+  },
+  "pipeline": {
+    "currentPhase": 1,
+    "level": "Dynamic",
+    "phaseHistory": []
+  },
+  "session": {
+    "startedAt": "2026-07-30T02:13:44.280Z",
+    "onboardingCompleted": false,
+    "lastActivity": "2026-07-30T02:57:35.326Z"
+  },
+  "history": [
+    {
+      "timestamp": "2026-07-30T02:13:44.290Z",
+      "feature": "multi-store-support",
+      "phase": "plan",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-30T02:18:36.134Z",
+      "feature": "multi-store-support",
+      "phase": "design",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-30T02:18:50.075Z",
+      "feature": "multi-store-support",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-30T02:24:36.903Z",
+      "feature": "multi-store-support",
+      "phase": "check",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-30T02:28:42.493Z",
+      "feature": "multi-store-support",
+      "phase": "design",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-30T02:38:06.227Z",
+      "feature": "multi-store-support",
+      "phase": "check",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-30T02:42:23.728Z",
+      "feature": "multi-store-support",
+      "phase": "do",
+      "action": "updated"
+    },
+    {
+      "timestamp": "2026-07-30T02:57:35.326Z",
+      "feature": "multi-store-support",
+      "phase": "check",
+      "action": "updated"
+    }
+  ],
+  "stateMachine": {
+    "defaultWorkflow": "default",
+    "activeWorkflows": {},
+    "totalTransitions": 0
+  },
+  "automation": {
+    "globalLevel": 2,
+    "trustScore": 38,
+    "pendingApprovals": 0,
+    "lastGateResult": null
+  },
+  "team": {
+    "enabled": true,
+    "stateFile": ".bkit/runtime/agent-state.json",
+    "eventsFile": ".bkit/runtime/agent-events.jsonl"
+  },
+  "taskHistory": [
+    {
+      "taskId": "1",
+      "phase": "plan",
+      "feature": "multi-store-support",
+      "createdAt": "2026-07-30T02:13:51.436Z"
+    },
+    {
+      "taskId": "2",
+      "phase": "design",
+      "feature": "multi-store-support",
+      "createdAt": "2026-07-30T02:18:41.265Z"
+    },
+    {
+      "taskId": "3",
+      "phase": "do",
+      "feature": "multi-store-support",
+      "createdAt": "2026-07-30T02:18:56.323Z"
+    },
+    {
+      "taskId": "5",
+      "phase": "do",
+      "feature": "multi-store-support Phase 4 (bulk onboarding + webhook)",
+      "createdAt": "2026-07-30T02:42:18.936Z"
+    }
+  ]
+}

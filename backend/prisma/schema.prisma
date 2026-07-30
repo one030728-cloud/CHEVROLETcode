@@ -1,0 +1,89 @@
+// Design Ref: docs/02-design/features/multi-store-support.design.md §3.1
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Store {
+  id             String   @id @default(uuid())
+  merchantId     String   @unique
+  name           String
+  businessNumber String?
+  status         String   @default("active")
+  createdAt      DateTime @default(now())
+
+  reservations  Reservation[]
+  payments      Payment[]
+  queueCounters QueueCounter[]
+  adminUsers    AdminUser[]
+}
+
+// Design Ref: docs/02-design/features/multi-store-support.design.md Phase 3
+// role: "hq_admin"(storeId 없음, 전체 매장 접근) | "store_admin"(storeId 필수, 자기 매장만)
+model AdminUser {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  role         String
+  storeId      String?
+  store        Store?   @relation(fields: [storeId], references: [id])
+  createdAt    DateTime @default(now())
+  lastLoginAt  DateTime?
+}
+
+model Reservation {
+  id          String    @id @default(uuid())
+  storeId     String
+  store       Store     @relation(fields: [storeId], references: [id])
+  carNumber   String
+  phone       String
+  serviceType String
+  queueNumber Int
+  status      String    @default("waiting")
+  createdAt   DateTime  @default(now())
+  calledAt    DateTime?
+  completedAt DateTime?
+
+  @@index([storeId])
+}
+
+model Payment {
+  id          String    @id @default(uuid())
+  storeId     String
+  store       Store     @relation(fields: [storeId], references: [id])
+  paymentKey  String?   @unique
+  carNumber   String?
+  serviceType String?
+  phone       String
+  amount      Int?
+  status      String    @default("requested")
+  promoAt     DateTime
+  promoSent   Boolean   @default(false)
+  promoSentAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([storeId])
+}
+
+// Design Ref: Phase 4 결제 웹훅 수신. x-toss-webhook-id로 중복 수신을 막는다
+// (토스 쪽에서 같은 이벤트를 재전송할 수 있다고 문서에 명시되어 있음).
+model WebhookEvent {
+  id          String   @id // x-toss-webhook-id 값 그대로 사용
+  eventType   String
+  receivedAt  DateTime @default(now())
+}
+
+// Plan SC: FR-06 — 매장/날짜별 원자적 채번으로 동시 예약 요청 시 중복 대기번호 방지
+model QueueCounter {
+  id      String @id @default(uuid())
+  storeId String
+  store   Store  @relation(fields: [storeId], references: [id])
+  date    String
+  counter Int    @default(0)
+
+  @@unique([storeId, date])
+}

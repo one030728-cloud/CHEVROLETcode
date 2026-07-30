@@ -118,10 +118,15 @@
 
       async function submitPayment({ paymentKey, amount, phone }) {
         try {
+          // App API(https://docs.tossplace.com/reference/plugin-sdk/front/app.html)의 비동기 함수.
+          // 실제 단말기에서는 토스프론트가 그 단말기에 온보딩된 실제 가맹점 정보를 반환하고,
+          // 로컬 브라우저 미리보기에서는 sdk.js가 채워둔 테스트 매장 정보가 반환된다.
+          const merchant = await sdk.app.getMerchant()
+          const merchantId = merchant?.id
           const res = await fetch(`${API_BASE}/api/payments`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ paymentKey, amount, phone }),
+            body: JSON.stringify({ paymentKey, amount, phone, merchantId }),
           })
           const json = await res.json().catch(() => ({}))
 

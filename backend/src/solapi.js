@@ -36,14 +36,20 @@ async function sendAlimtalk({ phone, text, templateId, variables }) {
   return result
 }
 
+// Design Ref: docs/01-plan/features/multi-store-support.plan.md §7.2 (알림톡 발신 정책)
+// Phase 4: 발신번호/카카오채널은 브랜드 전체 공용(SOLAPI_SENDER/SOLAPI_KAKAO_PFID 그대로) — 매장 구분은
+// #{매장명} 변수로만 한다. 매장별 발신번호가 필요해지면(프랜차이즈 개별 사업자 전환 시) 이 함수들에
+// storeId 인자를 추가해 store.phone_sender를 조회하도록 확장하면 된다.
+
 // 예약 접수 완료 (대기번호 발급). 이 시점에 앞서 정비완료 처리가 안 된 예약이 있을 때만 호출된다
 // (앞에 아무도 없으면 서버에서 바로 sendQueueTurnAlimtalk로 순서 호출을 보낸다).
-async function sendReservationAlimtalk({ phone, carNumber, queueNumber, peopleAhead, serviceType }) {
+async function sendReservationAlimtalk({ phone, carNumber, queueNumber, peopleAhead, serviceType, storeName }) {
   return sendAlimtalk({
     phone,
-    text: `[예약 접수]\n차량번호 ${carNumber} · ${serviceType} 예약이 접수되었습니다.\n대기번호 ${queueNumber}번, 앞으로 ${peopleAhead}명 남았습니다.`,
+    text: `[${storeName || '예약 접수'}]\n차량번호 ${carNumber} · ${serviceType} 예약이 접수되었습니다.\n대기번호 ${queueNumber}번, 앞으로 ${peopleAhead}명 남았습니다.`,
     templateId: process.env.SOLAPI_KAKAO_TEMPLATE_RESERVATION,
     variables: {
+      '#{매장명}': storeName || '',
       '#{차량번호}': carNumber,
       '#{전화번호}': phone,
       '#{대기번호}': String(queueNumber),
@@ -54,12 +60,13 @@ async function sendReservationAlimtalk({ phone, carNumber, queueNumber, peopleAh
 }
 
 // 순서가 되어 고객을 호출할 때
-async function sendQueueTurnAlimtalk({ phone, carNumber, queueNumber, serviceType }) {
+async function sendQueueTurnAlimtalk({ phone, carNumber, queueNumber, serviceType, storeName }) {
   return sendAlimtalk({
     phone,
-    text: `[순서 안내]\n${queueNumber}번, 고객님의 순서입니다. (차량번호 ${carNumber} · ${serviceType})`,
+    text: `[${storeName || '순서 안내'}]\n${queueNumber}번, 고객님의 순서입니다. (차량번호 ${carNumber} · ${serviceType})`,
     templateId: process.env.SOLAPI_KAKAO_TEMPLATE_QUEUE_TURN,
     variables: {
+      '#{매장명}': storeName || '',
       '#{차량번호}': carNumber,
       '#{대기번호}': String(queueNumber),
       '#{정비항목}': serviceType,
@@ -69,13 +76,14 @@ async function sendQueueTurnAlimtalk({ phone, carNumber, queueNumber, serviceTyp
 
 // 결제 완료 전자영수증. carNumber/serviceType은 결제 화면에서 다시 입력받는 게 아니라
 // 전화번호로 찾은 예약 기록에서 가져온 값이라 없을 수도 있다(예약 없이 바로 결제한 손님).
-async function sendReceiptAlimtalk({ phone, carNumber, serviceType, amount }) {
+async function sendReceiptAlimtalk({ phone, carNumber, serviceType, amount, storeName }) {
   const amountText = amount != null ? `${Number(amount).toLocaleString('ko-KR')}원` : ''
   return sendAlimtalk({
     phone,
-    text: `[전자영수증]\n결제가 완료되었습니다.${carNumber ? `\n차량번호 ${carNumber}` : ''}${serviceType ? `\n정비항목 ${serviceType}` : ''}${amountText ? `\n결제금액 ${amountText}` : ''}`,
+    text: `[${storeName || '전자영수증'}]\n결제가 완료되었습니다.${carNumber ? `\n차량번호 ${carNumber}` : ''}${serviceType ? `\n정비항목 ${serviceType}` : ''}${amountText ? `\n결제금액 ${amountText}` : ''}`,
     templateId: process.env.SOLAPI_KAKAO_TEMPLATE_RECEIPT,
     variables: {
+      '#{매장명}': storeName || '',
       '#{차량번호}': carNumber || '',
       '#{정비항목}': serviceType || '',
       '#{결제금액}': amountText,
@@ -84,12 +92,13 @@ async function sendReceiptAlimtalk({ phone, carNumber, serviceType, amount }) {
 }
 
 // 결제 3개월 후 자동 홍보 알림톡
-async function sendPromoAlimtalk({ phone, carNumber }) {
+async function sendPromoAlimtalk({ phone, carNumber, storeName }) {
   return sendAlimtalk({
     phone,
-    text: `[안내]\n그동안 이용해주셔서 감사합니다. 지금 다시 방문하시면 혜택을 드립니다.`,
+    text: `[안내]\n그동안 ${storeName || '저희 매장'}을 이용해주셔서 감사합니다. 지금 다시 방문하시면 혜택을 드립니다.`,
     templateId: process.env.SOLAPI_KAKAO_TEMPLATE_PROMO,
     variables: {
+      '#{매장명}': storeName || '',
       '#{차량번호}': carNumber || '',
     },
   })

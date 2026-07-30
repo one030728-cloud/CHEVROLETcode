@@ -191,8 +191,9 @@
 <div id="login-wrap">
   <div id="login-card">
     <h1>관리자 로그인</h1>
-    <p>ADMIN_TOKEN 값을 입력하세요.</p>
-    <input type="password" id="token-input" placeholder="관리자 토큰" autocomplete="off" />
+    <p>이메일/비밀번호로 로그인하세요.</p>
+    <input type="email" id="email-input" placeholder="이메일" autocomplete="username" style="width:100%;padding:14px 16px;font-size:16px;background:var(--surface);border:1.5px solid transparent;border-radius:12px;outline:none;margin-bottom:10px;box-sizing:border-box;" />
+    <input type="password" id="password-input" placeholder="비밀번호" autocomplete="current-password" />
     <div class="err" id="login-err"></div>
     <button id="login-btn" style="width:100%">로그인</button>
   </div>
@@ -201,12 +202,35 @@
 <div class="top" id="top-bar" style="display:none">
   <h1>쉐보레 포스모스 · 관리자</h1>
   <div class="actions">
+    <select id="store-select" style="max-width:160px"></select>
     <span class="status" id="conn-status"></span>
     <button class="ghost" id="logout-btn">로그아웃</button>
   </div>
 </div>
 
 <main id="main">
+  <details class="testform" id="store-add">
+    <summary>가맹점 관리 (본사) — 매장 등록</summary>
+    <div class="testform-body">
+      <input type="text" id="store-merchant-id" placeholder="merchantId (토스 SDK merchant.id)" />
+      <input type="text" id="store-name" placeholder="매장명" />
+      <input type="text" id="store-biz" placeholder="사업자번호 (선택)" />
+      <button id="store-add-btn">매장 등록</button>
+    </div>
+    <div class="testform-msg" id="store-add-msg"></div>
+  </details>
+
+  <details class="testform" id="store-admin-add">
+    <summary>가맹점 관리 (본사) — 매장 관리자 계정 발급</summary>
+    <div class="testform-body">
+      <input type="text" id="sa-merchant-id" placeholder="merchantId (등록된 매장)" />
+      <input type="email" id="sa-email" placeholder="이메일" />
+      <input type="password" id="sa-password" placeholder="비밀번호 (8자 이상)" />
+      <button id="sa-add-btn">계정 발급</button>
+    </div>
+    <div class="testform-msg" id="sa-add-msg"></div>
+  </details>
+
   <div class="callnext">
     <div id="callnext-info">대기중인 다음 손님을 호출하고 순서 알림을 보냅니다.</div>
     <button id="callnext-btn">다음 손님 호출</button>
@@ -257,13 +281,19 @@ const SERVICE_TYPES = [
 ]
 
 let token = sessionStorage.getItem('admin_token') || ''
+let adminRole = sessionStorage.getItem('admin_role') || ''
+let adminStoreId = sessionStorage.getItem('admin_store_id') || ''
+let myMerchantId = '' // store_admin 로그인 시 /api/admin/me로 채워짐 (테스트 예약용)
 let currentTab = 'reservations'
 let pollTimer = null
+let stores = []
+let currentStoreId = '' // '' = 전체 매장(본사 뷰). store_admin은 항상 자기 storeId로 고정된다.
 
 const loginWrap = document.getElementById('login-wrap')
 const topBar = document.getElementById('top-bar')
 const main = document.getElementById('main')
-const tokenInput = document.getElementById('token-input')
+const emailInput = document.getElementById('email-input')
+const passwordInput = document.getElementById('password-input')
 const loginBtn = document.getElementById('login-btn')
 const loginErr = document.getElementById('login-err')
 const logoutBtn = document.getElementById('logout-btn')
@@ -275,6 +305,19 @@ const testServiceSelect = document.getElementById('test-service')
 const testPhoneInput = document.getElementById('test-phone')
 const testSubmitBtn = document.getElementById('test-submit-btn')
 const testMsg = document.getElementById('test-msg')
+const storeSelect = document.getElementById('store-select')
+const storeMerchantIdInput = document.getElementById('store-merchant-id')
+const storeNameInput = document.getElementById('store-name')
+const storeBizInput = document.getElementById('store-biz')
+const storeAddBtn = document.getElementById('store-add-btn')
+const storeAddMsg = document.getElementById('store-add-msg')
+const storeAddPanel = document.getElementById('store-add')
+const storeAdminAddPanel = document.getElementById('store-admin-add')
+const saMerchantIdInput = document.getElementById('sa-merchant-id')
+const saEmailInput = document.getElementById('sa-email')
+const saPasswordInput = document.getElementById('sa-password')
+const saAddBtn = document.getElementById('sa-add-btn')
+const saAddMsg = document.getElementById('sa-add-msg')
 
 testServiceSelect.innerHTML = SERVICE_TYPES.map((s) => `<option value="${s.value}">${s.title}</option>`).join('')
 
@@ -290,27 +333,102 @@ function fmtAmount(n) {
 }
 
 async function api(path) {
-  const res = await fetch(path, { headers: { 'x-admin-token': token } })
+  const res = await fetch(path, { headers: { authorization: 'Bearer ' + token } })
   if (res.status === 401) throw new Error('UNAUTHORIZED')
   if (!res.ok) throw new Error('요청 실패 (' + res.status + ')')
   return res.json()
 }
 
 async function apiPost(path, method = 'POST') {
-  const res = await fetch(path, { method, headers: { 'x-admin-token': token } })
+  const res = await fetch(path, { method, headers: { authorization: 'Bearer ' + token } })
   const body = await res.json().catch(() => ({}))
   if (res.status === 401) throw new Error('UNAUTHORIZED')
   return { ok: res.ok, status: res.status, body }
 }
 
-function showApp() {
+async function showApp() {
   loginWrap.style.display = 'none'
   topBar.style.display = 'flex'
   main.style.display = 'block'
-  loadAll()
+
+  const isHq = adminRole === 'hq_admin'
+  storeAddPanel.style.display = isHq ? '' : 'none'
+  storeAdminAddPanel.style.display = isHq ? '' : 'none'
+
+  if (isHq) {
+    await loadStores()
+  } else {
+    // store_admin: 매장 선택 UI 자체가 필요 없다 — 항상 자기 매장으로 고정.
+    currentStoreId = adminStoreId
+    storeSelect.style.display = 'none'
+    const me = await api('/api/admin/me')
+    myMerchantId = me.store?.merchantId || ''
+  }
+
+  await loadAll()
   if (pollTimer) clearInterval(pollTimer)
   pollTimer = setInterval(loadAll, 15000)
 }
+
+async function loadStores() {
+  try {
+    const data = await api('/api/admin/stores')
+    stores = data.stores || []
+  } catch (e) {
+    stores = []
+  }
+  renderStoreSelect()
+}
+
+function renderStoreSelect() {
+  const options = ['<option value="">전체 매장</option>']
+    .concat(stores.map((s) => `<option value="${s.id}">${escapeHtml(s.name)}</option>`))
+  storeSelect.innerHTML = options.join('')
+  storeSelect.value = currentStoreId
+}
+
+storeSelect.addEventListener('change', () => {
+  currentStoreId = storeSelect.value
+  loadAll()
+})
+
+storeAddBtn.addEventListener('click', async () => {
+  const merchantId = storeMerchantIdInput.value.trim()
+  const name = storeNameInput.value.trim()
+  const businessNumber = storeBizInput.value.trim()
+  storeAddMsg.textContent = ''
+  storeAddMsg.className = 'testform-msg'
+  if (!merchantId || !name) {
+    storeAddMsg.textContent = 'merchantId와 매장명은 필수입니다.'
+    storeAddMsg.className = 'testform-msg err'
+    return
+  }
+  storeAddBtn.disabled = true
+  try {
+    const res = await fetch('/api/admin/stores', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', authorization: 'Bearer ' + token },
+      body: JSON.stringify({ merchantId, name, businessNumber }),
+    })
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok || !body.ok) {
+      storeAddMsg.textContent = body.error || '등록 실패'
+      storeAddMsg.className = 'testform-msg err'
+      return
+    }
+    storeAddMsg.textContent = `등록 완료: ${body.store.name}`
+    storeAddMsg.className = 'testform-msg ok'
+    storeMerchantIdInput.value = ''
+    storeNameInput.value = ''
+    storeBizInput.value = ''
+    await loadStores()
+  } catch (e) {
+    storeAddMsg.textContent = '요청 중 오류가 발생했습니다.'
+    storeAddMsg.className = 'testform-msg err'
+  } finally {
+    storeAddBtn.disabled = false
+  }
+})
 
 function showLogin(message) {
   loginWrap.style.display = 'flex'
@@ -320,32 +438,105 @@ function showLogin(message) {
   if (message) loginErr.textContent = message
 }
 
-async function tryLogin(inputToken) {
-  token = inputToken
+function persistSession() {
+  sessionStorage.setItem('admin_token', token)
+  sessionStorage.setItem('admin_role', adminRole)
+  sessionStorage.setItem('admin_store_id', adminStoreId || '')
+}
+
+function clearSession() {
+  sessionStorage.removeItem('admin_token')
+  sessionStorage.removeItem('admin_role')
+  sessionStorage.removeItem('admin_store_id')
+  token = ''
+  adminRole = ''
+  adminStoreId = ''
+}
+
+async function loginWithCredentials(email, password) {
   try {
-    await api('/api/reservations')
-    sessionStorage.setItem('admin_token', token)
+    const res = await fetch('/api/admin/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    })
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok || !body.ok) {
+      clearSession()
+      showLogin(body.error || '로그인에 실패했습니다.')
+      return
+    }
+    token = body.token
+    adminRole = body.role
+    adminStoreId = body.storeId || ''
+    persistSession()
     loginErr.textContent = ''
     showApp()
   } catch (e) {
-    token = ''
-    sessionStorage.removeItem('admin_token')
-    showLogin('토큰이 올바르지 않습니다.')
+    clearSession()
+    showLogin('로그인 중 오류가 발생했습니다.')
+  }
+}
+
+async function tryResumeSession() {
+  try {
+    await api('/api/admin/me')
+    showApp()
+  } catch (e) {
+    clearSession()
+    showLogin('세션이 만료되었습니다. 다시 로그인해주세요.')
   }
 }
 
 loginBtn.addEventListener('click', () => {
-  const v = tokenInput.value.trim()
-  if (!v) return
-  tryLogin(v)
+  const email = emailInput.value.trim()
+  const password = passwordInput.value
+  if (!email || !password) return
+  loginWithCredentials(email, password)
 })
-tokenInput.addEventListener('keydown', (e) => {
+passwordInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') loginBtn.click()
 })
 logoutBtn.addEventListener('click', () => {
-  sessionStorage.removeItem('admin_token')
-  token = ''
+  clearSession()
   showLogin('')
+})
+
+saAddBtn.addEventListener('click', async () => {
+  const merchantId = saMerchantIdInput.value.trim()
+  const email = saEmailInput.value.trim()
+  const password = saPasswordInput.value
+  saAddMsg.textContent = ''
+  saAddMsg.className = 'testform-msg'
+  if (!merchantId || !email || !password) {
+    saAddMsg.textContent = 'merchantId/이메일/비밀번호는 필수입니다.'
+    saAddMsg.className = 'testform-msg err'
+    return
+  }
+  saAddBtn.disabled = true
+  try {
+    const res = await fetch('/api/admin/store-admins', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', authorization: 'Bearer ' + token },
+      body: JSON.stringify({ merchantId, email, password }),
+    })
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok || !body.ok) {
+      saAddMsg.textContent = body.error || '발급 실패'
+      saAddMsg.className = 'testform-msg err'
+      return
+    }
+    saAddMsg.textContent = `발급 완료: ${body.admin.email}`
+    saAddMsg.className = 'testform-msg ok'
+    saMerchantIdInput.value = ''
+    saEmailInput.value = ''
+    saPasswordInput.value = ''
+  } catch (e) {
+    saAddMsg.textContent = '요청 중 오류가 발생했습니다.'
+    saAddMsg.className = 'testform-msg err'
+  } finally {
+    saAddBtn.disabled = false
+  }
 })
 
 document.querySelectorAll('.tab').forEach((tab) => {
@@ -371,8 +562,8 @@ document.getElementById('reservations-view').addEventListener('click', async (e)
       if (!ok) alert(body.error || '호출에 실패했습니다.')
     } catch (err) {
       if (err.message === 'UNAUTHORIZED') {
-        sessionStorage.removeItem('admin_token')
-        showLogin('토큰이 만료되었거나 올바르지 않습니다.')
+        clearSession()
+        showLogin('세션이 만료되었습니다. 다시 로그인해주세요.')
         return
       }
       alert('호출 중 오류가 발생했습니다.')
@@ -389,8 +580,8 @@ document.getElementById('reservations-view').addEventListener('click', async (e)
       if (!ok) alert(body.error || '처리에 실패했습니다.')
     } catch (err) {
       if (err.message === 'UNAUTHORIZED') {
-        sessionStorage.removeItem('admin_token')
-        showLogin('토큰이 만료되었거나 올바르지 않습니다.')
+        clearSession()
+        showLogin('세션이 만료되었습니다. 다시 로그인해주세요.')
         return
       }
       alert('처리 중 오류가 발생했습니다.')
@@ -407,8 +598,8 @@ document.getElementById('reservations-view').addEventListener('click', async (e)
       if (!ok) alert(body.error || '삭제에 실패했습니다.')
     } catch (err) {
       if (err.message === 'UNAUTHORIZED') {
-        sessionStorage.removeItem('admin_token')
-        showLogin('토큰이 만료되었거나 올바르지 않습니다.')
+        clearSession()
+        showLogin('세션이 만료되었습니다. 다시 로그인해주세요.')
         return
       }
       alert('삭제 중 오류가 발생했습니다.')
@@ -475,15 +666,16 @@ function escapeHtml(s) {
 
 async function loadAll() {
   try {
-    const [resData, payData] = await Promise.all([api('/api/reservations'), api('/api/payments')])
+    const qs = currentStoreId ? `?storeId=${encodeURIComponent(currentStoreId)}` : ''
+    const [resData, payData] = await Promise.all([api('/api/reservations' + qs), api('/api/payments' + qs)])
     renderReservations(resData.reservations)
     renderPayments(payData.payments)
     connStatus.textContent = ''
     updateCallnextInfo(resData.reservations)
   } catch (e) {
     if (e.message === 'UNAUTHORIZED') {
-      sessionStorage.removeItem('admin_token')
-      showLogin('토큰이 만료되었거나 올바르지 않습니다.')
+      clearSession()
+      showLogin('세션이 만료되었거나 권한이 없습니다. 다시 로그인해주세요.')
     } else {
       connStatus.textContent = '연결 오류'
     }
@@ -491,6 +683,11 @@ async function loadAll() {
 }
 
 function updateCallnextInfo(reservations) {
+  if (!currentStoreId) {
+    callnextInfo.textContent = '매장을 선택하면 다음 손님을 호출할 수 있습니다.'
+    callnextBtn.disabled = true
+    return
+  }
   const waiting = reservations.filter((r) => r.status === 'waiting')
   callnextInfo.textContent = waiting.length
     ? `대기중 ${waiting.length}건 · 다음 순번 #${[...waiting].sort((a, b) => a.queueNumber - b.queueNumber)[0].queueNumber}`
@@ -499,18 +696,19 @@ function updateCallnextInfo(reservations) {
 }
 
 callnextBtn.addEventListener('click', async () => {
+  if (!currentStoreId) return
   callnextBtn.disabled = true
   callnextBtn.textContent = '호출 중...'
   try {
-    const { ok, body } = await apiPost('/api/queue/call-next')
+    const { ok, body } = await apiPost(`/api/queue/call-next?storeId=${encodeURIComponent(currentStoreId)}`)
     if (!ok) {
       alert(body.error || '호출에 실패했습니다.')
     }
     await loadAll()
   } catch (e) {
     if (e.message === 'UNAUTHORIZED') {
-      sessionStorage.removeItem('admin_token')
-      showLogin('토큰이 만료되었거나 올바르지 않습니다.')
+      clearSession()
+      showLogin('세션이 만료되었거나 권한이 없습니다. 다시 로그인해주세요.')
     } else {
       alert('호출 중 오류가 발생했습니다.')
     }
@@ -525,12 +723,21 @@ testSubmitBtn.addEventListener('click', async () => {
   const phone = testPhoneInput.value.trim()
   testMsg.textContent = ''
   testMsg.className = 'testform-msg'
+
+  // hq_admin은 상단 드롭다운에서 선택한 매장, store_admin은 로그인 시 조회해둔 자기 매장(myMerchantId) 사용.
+  const merchantId = adminRole === 'store_admin' ? myMerchantId : stores.find((s) => s.id === currentStoreId)?.merchantId
+  if (!merchantId) {
+    testMsg.textContent = '상단에서 매장을 먼저 선택해주세요 ("전체 매장"으로는 테스트 예약을 만들 수 없습니다).'
+    testMsg.className = 'testform-msg err'
+    return
+  }
+
   testSubmitBtn.disabled = true
   try {
     const res = await fetch('/api/reservations', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ carNumber, phone, serviceType }),
+      body: JSON.stringify({ carNumber, phone, serviceType, merchantId }),
     })
     const body = await res.json().catch(() => ({}))
     if (!res.ok || !body.ok) {
@@ -554,7 +761,7 @@ testSubmitBtn.addEventListener('click', async () => {
 })
 
 if (token) {
-  tryLogin(token)
+  tryResumeSession()
 } else {
   showLogin('')
 }

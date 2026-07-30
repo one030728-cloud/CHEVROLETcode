@@ -53,18 +53,21 @@ git clone https://github.com/one030728-cloud/CHEVROLETcode.git
 cd CHEVROLETcode/backend
 npm install
 cp .env.example .env   # 값은 비워둬도 서버는 뜹니다 (알림톡 발송만 실패, 예약/결제 접수는 정상 처리됨)
+npx prisma migrate deploy   # 로컬 SQLite DB(backend/prisma/dev.db) 생성 (계정 발급 불필요)
 npm start
 ```
 
-필요한 것은 **Node.js 18 이상**뿐입니다. 별도 DB/외부 서비스 계정 없이도 로컬에서 예약·결제 접수 흐름을 바로 테스트할 수 있습니다
-(알림톡 발송만 솔라피 키가 있어야 실제로 나갑니다).
+필요한 것은 **Node.js 18 이상**뿐입니다. DB는 로컬 SQLite 파일(`prisma/dev.db`)을 그대로 쓰므로 외부 서비스 계정 없이도
+로컬에서 예약·결제 접수 흐름을 바로 테스트할 수 있고, 이제 서버를 재시작해도 데이터가 남아있습니다
+(알림톡 발송만 솔라피 키가 있어야 실제로 나갑니다). 운영 배포 시 Postgres로 전환하는 방법은
+[`docs/multi-store-architecture-review.md`](docs/multi-store-architecture-review.md) 참고.
 
 | 접속 주소 | 내용 |
 | --- | --- |
 | `http://localhost:3000` | 독립 웹페이지 — 차량번호 → 전화번호 예약 폼 |
 | `http://localhost:3000/?mode=payment` | 독립 웹페이지 — 결제(영수증) 모드 |
 | `http://localhost:3000/toss-plugin/index.html` | 토스프론트 플러그인 화면을 브라우저에서 미리보기 |
-| `http://localhost:3000/admin.html` | 관리자 대시보드 (`ADMIN_TOKEN` 필요) |
+| `http://localhost:3000/admin.html` | 관리자 대시보드 (이메일/비밀번호 로그인) |
 
 ## 프로젝트 구조
 
@@ -73,7 +76,10 @@ backend/
   server.js               # Express 서버 (예약/결제 API, 대기순번 호출, 3개월 프로모션 스케줄러)
   src/
     solapi.js              # 알림톡 발송 함수 (예약안내/순서호출/영수증/프로모션 템플릿별로 분리)
-    store.js                # 임시 인메모리 저장소 (서버 재시작하면 데이터 사라짐)
+    store.js                # DB 데이터 계층 (Prisma, SQLite 로컬/Postgres 운영)
+    auth.js                 # 관리자 비밀번호 해시/JWT 발급·검증
+  prisma/
+    schema.prisma            # Store/Reservation/Payment/QueueCounter/AdminUser 모델
   public/
     index.html, reservation.js, styles.css   # 독립 웹페이지 버전 (?mode=payment로 결제 모드)
     admin.html                                # 관리자 대시보드
@@ -88,16 +94,46 @@ backend/
 
 | 메서드/경로 | 설명 | 인증 |
 | --- | --- | --- |
-| `POST /api/reservations` | 차량번호+정비항목(`serviceType`)+전화번호 등록, 대기번호 발급. 앞서 정비완료 안 된 예약이 없으면 즉시 순서 호출 알림톡, 있으면 "N명 남았습니다" 접수 알림톡 발송 | 없음 (10분당 5회 레이트리밋) |
-| `GET /api/reservations` | 예약 전체 목록 조회 (관리자 화면용, 최신순) | `x-admin-token` |
-| `POST /api/queue/call-next` | 대기열 맨 앞(`waiting`) 손님을 호출, "순서입니다" 알림톡 발송 | `x-admin-token` |
-| `POST /api/reservations/:id/call` | 특정 예약을 순서와 무관하게 즉시 호출 (`waiting` 상태만 가능) | `x-admin-token` |
-| `POST /api/reservations/:id/complete` | 정비완료 처리. 이후 예약들의 "앞사람" 계산에서 빠짐 | `x-admin-token` |
-| `DELETE /api/reservations/:id` | 예약 삭제 (테스트 데이터 정리, 취소 처리용) | `x-admin-token` |
-| `GET /api/reservations/failed` | 순서/접수 알림톡 발송 실패 건 조회 | `x-admin-token` |
-| `POST /api/payments` | 전화번호(+금액/paymentKey) 등록. 차량번호/정비항목은 그 전화번호로 등록된 예약 기록에서 자동으로 가져옴(없으면 클라이언트가 보낸 `carNumber`로 대체). 전자영수증 즉시 발송, 3개월 후 프로모션 예약 | 없음 (10분당 10회 레이트리밋) |
-| `GET /api/payments` | 결제 전체 목록 조회 (관리자 화면용, 최신순) | `x-admin-token` |
-| `GET /api/payments/failed` | 전자영수증 발송 실패 건 조회 | `x-admin-token` |
+| `POST /api/reservations` | `merchantId`(토스 SDK `sdk.merchant.id`, 필수)로 가맹점을 식별하고, 차량번호+정비항목(`serviceType`)+전화번호 등록, 대기번호(매장별로 독립 채번) 발급. 앞서 정비완료 안 된 예약이 없으면 즉시 순서 호출 알림톡, 있으면 "N명 남았습니다" 접수 알림톡 발송 | 없음 (10분당 5회 레이트리밋) |
+| `GET /api/reservations` | 예약 목록 조회 (관리자 화면용, 최신순). `?storeId=`로 특정 매장만 필터링, 생략하면 전체 매장(본사 뷰) | JWT (Bearer) |
+| `POST /api/queue/call-next?storeId=` | 지정한 매장의 대기열 맨 앞(`waiting`) 손님을 호출, "순서입니다" 알림톡 발송. `storeId` 쿼리파라미터 필수 | JWT (Bearer) |
+| `POST /api/reservations/:id/call` | 특정 예약을 순서와 무관하게 즉시 호출 (`waiting` 상태만 가능) | JWT (Bearer) |
+| `POST /api/reservations/:id/complete` | 정비완료 처리. 이후 예약들의 "앞사람" 계산에서 빠짐 | JWT (Bearer) |
+| `DELETE /api/reservations/:id` | 예약 삭제 (테스트 데이터 정리, 취소 처리용) | JWT (Bearer) |
+| `GET /api/reservations/failed` | 순서/접수 알림톡 발송 실패 건 조회. `?storeId=` 필터 가능 | JWT (Bearer) |
+| `POST /api/payments` | `merchantId`(필수)로 가맹점을 식별하고, 전화번호(+금액/paymentKey) 등록. 차량번호/정비항목은 같은 매장 안에서 그 전화번호로 등록된 예약 기록에서 자동으로 가져옴(없으면 클라이언트가 보낸 `carNumber`로 대체). 전자영수증 즉시 발송, 3개월 후 프로모션 예약 | 없음 (10분당 10회 레이트리밋) |
+| `GET /api/payments` | 결제 목록 조회 (관리자 화면용, 최신순). `?storeId=` 필터 가능 | JWT (Bearer) |
+| `GET /api/payments/failed` | 전자영수증 발송 실패 건 조회. `?storeId=` 필터 가능 | JWT (Bearer) |
+| `GET /api/admin/stores` | 등록된 가맹점(매장) 목록 조회 | JWT (Bearer), `hq_admin` 전용 |
+| `POST /api/admin/stores` | 가맹점 등록. `merchantId`(토스 SDK merchant.id와 매핑되는 값)+매장명(+사업자번호)을 받아 내부 `store_id`를 발급 | JWT (Bearer), `hq_admin` 전용 |
+| `POST /api/admin/login` | 이메일/비밀번호로 로그인, JWT 발급 (`role`: `hq_admin`\|`store_admin`, `storeId` 포함) | 없음 |
+| `GET /api/admin/me` | 로그인한 관리자 본인 정보(역할, 소속 매장) 조회 | JWT (Bearer) |
+| `POST /api/admin/store-admins` | 매장 관리자 계정 발급. `merchantId`로 매장을 찾아 그 매장에 스코프된 `store_admin` 계정 생성 | JWT (Bearer), `hq_admin` 전용 |
+| `POST /api/admin/stores/bulk` | 매장 대량 등록. `{ stores: [{merchantId, name, businessNumber?}, ...] }` (최대 500건), 항목별 성공/실패를 나눠서 반환 | JWT (Bearer), `hq_admin` 전용 |
+| `POST /api/webhooks/toss/payment` | 토스플레이스 결제 승인/취소 웹훅 수신(백업 경로). `x-toss-webhook-id`로 중복 방지, `x-toss-signature`로 서명 검증(TOSS_WEBHOOK_SECRET 설정 시) | 없음(웹훅 전용, 토스가 호출) |
+
+<details>
+<summary>멀티 가맹점(매장) 구조 — merchantId ↔ store_id, 2계층 관리자</summary>
+
+- 예약/결제 API는 `merchantId`(토스 SDK가 단말기에서 넘겨주는 `sdk.merchant.id`)를 필수로 받습니다.
+  등록되지 않은 `merchantId`면 404를 반환합니다 — 본사가 `/api/admin/stores`로 먼저 매장을 등록해야
+  그 매장의 플러그인 요청이 통과됩니다.
+- 모든 예약/결제 레코드는 내부 `storeId`로 스코프됩니다(Postgres/SQLite, Prisma). 대기번호(`queueNumber`)도
+  매장별·날짜별로 원자적으로 독립 채번되고, 결제 화면의 전화번호→예약 매칭(`findLatestReservationByPhone`)도
+  같은 매장 안에서만 찾습니다.
+- 로컬 개발/미리보기는 `toss-plugin/sdk.js`의 `merchant.id: 0` 오버라이드와 짝을 맞춰 서버가 부팅 시
+  `merchantId: '0'` 테스트 매장을 자동으로 시드해둡니다.
+- **관리자 인증은 이메일/비밀번호 + JWT 2계층 구조**입니다. `hq_admin`(본사)은 전체 매장을 보고 매장/매장관리자를
+  등록할 수 있고, `store_admin`(가맹점)은 로그인하는 순간 자기 `storeId`로 강제 스코프되어 다른 매장의
+  예약/결제는 조회·조작(`/complete`, `/call`, `DELETE`)이 전부 403으로 막힙니다. 최초 부팅 시 `hq_admin` 계정이
+  없으면 자동 생성됩니다(§환경 변수 참고).
+- `admin.html` 상단에 매장 선택 드롭다운("전체 매장" 포함, `hq_admin`만 보임)과 "매장 등록"/"매장 관리자 계정 발급"
+  폼이 있습니다. `store_admin`으로 로그인하면 이 드롭다운/폼은 숨겨지고 자기 매장 화면만 보입니다.
+- 자세한 아키텍처와 남은 로드맵(Phase 4 대량 온보딩, Phase 5 스케일 검증)은
+  [`docs/multi-store-architecture-review.md`](docs/multi-store-architecture-review.md)와
+  [`docs/01-plan/features/multi-store-support.plan.md`](docs/01-plan/features/multi-store-support.plan.md) 참고.
+
+</details>
 
 <details>
 <summary>세부 동작 참고</summary>
@@ -177,6 +213,16 @@ backend/
 ```env
 PORT=3000
 
+# DB. 로컬은 SQLite 파일 그대로, 운영은 Postgres 연결 문자열로 교체.
+DATABASE_URL="file:./dev.db"
+
+# 관리자 로그인(JWT) 서명 키. 운영에서는 반드시 긴 랜덤 문자열로 고정. 비워두면 로컬 개발용 임시값 자동 생성.
+JWT_SECRET=
+
+# 최초 부팅 시 자동 생성되는 본사(hq_admin) 계정. 비워두면 admin@local + 무작위 비밀번호(콘솔 1회 출력).
+ADMIN_BOOTSTRAP_EMAIL=
+ADMIN_BOOTSTRAP_PASSWORD=
+
 # 솔라피 (알림톡)
 SOLAPI_API_KEY=
 SOLAPI_API_SECRET=
@@ -186,9 +232,6 @@ SOLAPI_KAKAO_TEMPLATE_RESERVATION=   # 예약 접수 안내 (대기인원 있을
 SOLAPI_KAKAO_TEMPLATE_QUEUE_TURN=    # "고객님의 순서입니다" 순서 호출
 SOLAPI_KAKAO_TEMPLATE_RECEIPT=       # 결제 전자영수증
 SOLAPI_KAKAO_TEMPLATE_PROMO=         # 결제 3개월 후 홍보
-
-# 관리자 API(대시보드, 호출/완료/삭제, 실패건 조회)용 토큰. 임의의 긴 랜덤 문자열로 설정.
-ADMIN_TOKEN=
 ```
 
 카카오 알림톡은 채널 개설 + 템플릿 승인이 필요해서 보통 1~3영업일이 걸립니다. `SOLAPI_KAKAO_PFID`와 각 템플릿 ID가
@@ -230,7 +273,8 @@ ADMIN_TOKEN=
 2. Root Directory: `backend`
 3. Build Command: `npm install`
 4. Start Command: `npm start`
-5. Environment 탭에서 위 `SOLAPI_*`, `ADMIN_TOKEN` 키들을 등록
+5. Environment 탭에서 위 `DATABASE_URL`(Postgres 연결 문자열 — Render 무료 플랜은 재배포 시 로컬 파일이 초기화되므로
+   SQLite가 아니라 반드시 외부 Postgres 사용), `JWT_SECRET`, `ADMIN_BOOTSTRAP_*`, `SOLAPI_*` 키들을 등록
 6. `main` 브랜치에 push하면 Render가 자동 재배포합니다 (Auto-Deploy 켜져 있는 경우)
 
 > ⚠️ Render 무료 플랜은 트래픽이 없으면 슬립 상태가 되어 오전 10시 프로모션 스케줄러가 안 돌 수 있습니다.
@@ -241,9 +285,31 @@ ADMIN_TOKEN=
 <details open>
 <summary><strong>현재 상태</strong></summary>
 
-- **DB 없음.** 예약/결제 기록은 `src/store.js`의 인메모리 배열에만 저장됩니다. 서버 재시작/재배포 시 전부 사라집니다.
-  특히 결제 기록의 `promoAt`(3개월 후 발송 예정 시각)이 재시작으로 유실되면 홍보 알림톡이 영구히 안 나가므로,
-  DB(Supabase 등) 교체가 최우선입니다. 교체 시 `src/store.js`의 함수 시그니처만 유지한 채 내부 구현을 바꾸면 됩니다.
+- **DB 전환 완료 (SQLite, Prisma).** 예약/결제/매장 기록이 `backend/prisma/dev.db`(SQLite)에 저장되어 서버 재시작/재배포에도
+  유지됩니다 (`promoAt` 3개월 프로모션 예약도 유실되지 않음). 다만 지금은 로컬 파일 기반 SQLite이고, 운영 배포 시에는
+  `prisma/schema.prisma`의 `provider`를 `postgresql`로, `.env`의 `DATABASE_URL`을 Postgres(Supabase 등) 연결 문자열로
+  바꾸고 `npx prisma migrate dev`를 다시 실행해야 합니다 (자세한 내용은 `docs/02-design/features/multi-store-support.design.md`).
+  `src/store.js`는 여전히 함수 시그니처만 유지한 채 내부 구현(Prisma 쿼리)만 갈아끼우는 구조입니다.
+- **멀티 가맹점 지원 (Phase 1~4 완료).** `merchantId` 기반 매장 식별 + DB 스코핑, 이메일/비밀번호 + JWT 기반
+  2계층 관리자 인증(`hq_admin`/`store_admin`), 매장 대량 등록(`POST /api/admin/stores/bulk`), 알림톡
+  발신 정책(브랜드 공용 + `#{매장명}` 변수 구분), 결제 웹훅 수신 엔드포인트(백업 경로, 실제 등록은 토스 담당자
+  문의 필요)까지 구현되었습니다. 남은 건 Phase 5(운영 Postgres 전환, 스케일/부하 검증) —
+  `docs/01-plan/features/multi-store-support.plan.md` 참고.
+- **토스 SDK 공식 문서 대조 재검토 완료 (2026-07-30).** 실제 `docs.tossplace.com`을 확인해서 아래 2가지 Critical
+  버그를 찾아 수정했습니다.
+  - `sdk.merchant`/`sdk.serialNumber`는 **실존하지 않는 API**였습니다 — 실제로는 App API의 비동기 함수
+    `await sdk.app.getMerchant()` / `await sdk.app.getSerialNumber()`([문서](https://docs.tossplace.com/reference/plugin-sdk/front/app.html))만 존재합니다.
+    이전 코드로는 **실제 단말기에서 merchantId가 항상 undefined**가 되어 모든 예약/결제 요청이 실패했을
+    것입니다. `reservation.html`/`payment.html`/`sdk.js`를 실제 API 기준으로 수정했습니다.
+  - 웹훅 서명 검증 방식을 실제 스펙(`HMAC-SHA256(secret, "{timestamp}.{rawBody}")` → hex, `v1=` 접두사,
+    `x-toss-timestamp` 신선도 검사)에 맞게 다시 구현했습니다([문서](https://docs.tossplace.com/reference/open-api/webhook.html)).
+  - Template API(`renderIdlePage`/`renderInputPage`/`renderSelectPage`/`renderResultPage`)와
+    `sdk.payment.requestPayment()` 파라미터는 실제 문서와 대조해 **일치함을 확인**했습니다 (수정 불필요).
+  - ⚠️ **여전히 미해결**: 결제 웹훅 payload(`data.payment` 객체)에는 `paymentKey` 필드가 없습니다. 우리
+    시스템이 클라이언트에서 생성해 `sdk.payment.requestPayment()`에 넘기는 `paymentKey`가 이 payment
+    객체의 어떤 필드(`orderId`?)와 대응되는지 공개 문서로는 확인이 안 되어, 지금은 웹훅 수신 시 로그만
+    남기고 자동으로 결제 레코드를 만들지 않습니다(엉뚱한 예약에 영수증이 나가는 것 방지). 확정하려면
+    `developer-support@tossplace.com`에 직접 문의해야 합니다.
 - **솔라피 키 미발급.** `.env`의 `SOLAPI_*` 값이 전부 비어 있어도 예약/결제 접수 API는 정상 동작하고,
   알림톡 발송만 실패 로그를 남기고 넘어갑니다 (요청 자체는 실패시키지 않음).
 - **3개월 프로모션 스케줄러는 `node-cron`으로 매일 10시 실행.** 서버가 그 시각에 떠 있지 않으면(예: 무료 플랜 슬립) 그날은 건너뛰지만,
@@ -257,8 +323,9 @@ ADMIN_TOKEN=
 **TODO**
 
 - [ ] 솔라피 알림톡 키/템플릿 4종 발급받아 Render Environment와 로컬 `.env`에 채우기
-- [ ] `src/store.js`를 실제 DB(Supabase 등)로 교체 — 3개월 프로모션 예약이 서버 재시작에도 살아남도록 하는 게 최우선
-- [ ] Render Environment에 `ADMIN_TOKEN` 값 등록 (긴 랜덤 문자열, 아직 미발급)
+- [ ] 운영 배포 전 `DATABASE_URL`을 Postgres(Supabase 등)로 전환 — Render 재배포 시 로컬 SQLite 파일은 초기화됨
+- [ ] Render Environment에 `JWT_SECRET`(고정 랜덤값)과 `ADMIN_BOOTSTRAP_EMAIL`/`ADMIN_BOOTSTRAP_PASSWORD` 등록
+- [ ] 웹훅 서명 검증 방식을 토스 담당자에게 문의해서 실제 스펙에 맞게 수정, `developer-support@tossplace.com`에 웹훅 등록 요청
 - [ ] Render 무료 플랜 슬립으로 인한 프로모션 스케줄러 미실행 문제 해결 (유료 플랜 또는 외부 핑)
 - [ ] **토스플레이스 개발자센터에서 실제 플러그인 등록·테스트 가맹점 연결·단말기 온보딩** (사업자 계정 필요, [토스프론트 플러그인 연동](#토스프론트-플러그인-연동) 섹션 절차대로)
 - [ ] `toss-plugin/` 폴더 ZIP 압축 후 개발 배포 → 실제 단말기에서 화면/결제 흐름 확인

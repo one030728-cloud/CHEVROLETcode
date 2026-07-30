@@ -1,135 +1,303 @@
-// 임시 인메모리 저장소. 서버가 재시작되면 데이터가 사라집니다.
-// 나중에 실제 DB(Supabase 등)로 교체할 때는 이 파일의 함수 시그니처만 유지하면 됩니다.
-// 특히 promoAt으로 미래 발송을 예약하는 프로모션 알림톡은 서버 재시작 시 유실되면 안 되므로
-// DB 교체가 최우선 순위입니다 (README "다음 단계" 참고).
+// Design Ref: docs/02-design/features/multi-store-support.design.md §2.0 (Option C)
+// DB 데이터 계층. 예전 인메모리 버전과 export 함수 시그니처를 그대로 유지한 채
+// 내부만 Prisma(Client)로 교체했다 — server.js는 await만 붙이면 그대로 동작한다.
+// 로컬/프로토타입은 SQLite(.env의 DATABASE_URL=file:./dev.db), 운영 전환 시
+// DATABASE_URL을 Postgres로 바꾸고 prisma/schema.prisma의 provider를 postgresql로 바꾼 뒤
+// `npx prisma migrate dev`를 다시 실행하면 된다 (docs/multi-store-architecture-review.md 참고).
 
-const { randomUUID } = require('node:crypto')
+const { PrismaClient } = require('@prisma/client')
+const { hashPassword } = require('./auth')
 
-const reservations = []
-const payments = []
+const prisma = new PrismaClient()
 
-let dailyQueueCounter = 0
-let dailyQueueDate = null
+// Plan SC: FR-07 — 최초 부팅 시 본사(hq_admin) 계정이 하나도 없으면 자동 생성한다.
+// 비밀번호는 ADMIN_BOOTSTRAP_PASSWORD가 있으면 그 값을, 없으면 무작위로 생성해 콘솔에 한 번만 출력한다.
+async function ensureDefaultHqAdmin() {
+  const existing = await prisma.adminUser.findFirst({ where: { role: 'hq_admin' } })
+  if (existing) return
 
-function nextQueueNumber() {
+  const email = process.env.ADMIN_BOOTSTRAP_EMAIL || 'admin@local'
+  const password = process.env.ADMIN_BOOTSTRAP_PASSWORD || require('node:crypto').randomBytes(9).toString('base64url')
+  const passwordHash = await hashPassword(password)
+
+  await prisma.adminUser.create({
+    data: { email, passwordHash, role: 'hq_admin', storeId: null },
+  })
+
+  console.log('='.repeat(60))
+  console.log('[bootstrap] 본사 관리자 계정이 생성되었습니다. 최초 1회만 출력됩니다.')
+  console.log(`  이메일: ${email}`)
+  if (!process.env.ADMIN_BOOTSTRAP_PASSWORD) {
+    console.log(`  비밀번호(무작위 생성): ${password}`)
+    console.log('  -> .env에 ADMIN_BOOTSTRAP_PASSWORD로 고정값을 지정하면 재생성 시에도 동일 비밀번호를 씁니다.')
+  } else {
+    console.log('  비밀번호: .env의 ADMIN_BOOTSTRAP_PASSWORD 값 사용')
+  }
+  console.log('='.repeat(60))
+}
+
+function findAdminUserByEmail(email) {
+  return prisma.adminUser.findUnique({ where: { email } })
+}
+
+function getAdminUser(id) {
+  return prisma.adminUser.findUnique({ where: { id } })
+}
+
+function createAdminUser({ email, passwordHash, role, storeId }) {
+  return prisma.adminUser.create({ data: { email, passwordHash, role, storeId: storeId || null } })
+}
+
+async function markAdminLogin(id) {
+  try {
+    return await prisma.adminUser.update({ where: { id }, data: { lastLoginAt: new Date() } })
+  } catch {
+    return null
+  }
+}
+
+// 로컬 개발/토스프론트 미리보기용 기본 가맹점.
+// sdk.js의 overrides({ merchant: { id: 0, ... } })와 짝을 맞춘 값이라, 서버를 새로 띄워도
+// 로컬 브라우저 미리보기(merchantId=0)가 바로 동작한다. upsert라 여러 번 불려도 안전하다.
+// Plan SC: FR-06 — 서버 재시작 후에도 매장이 남아있는지 확인하는 시드 데이터(§8.5).
+async function ensureDefaultStore() {
+  await prisma.store.upsert({
+    where: { merchantId: '0' },
+    update: {},
+    create: { merchantId: '0', name: '쉐보레 대리점 (테스트)', businessNumber: '0000000000' },
+  })
+}
+
+function createStore({ merchantId, name, businessNumber }) {
+  return prisma.store.create({
+    data: { merchantId: String(merchantId), name, businessNumber: businessNumber || null },
+  })
+}
+
+function listStores() {
+  return prisma.store.findMany()
+}
+
+// Design Ref: Phase 4 대량 온보딩. 각 항목을 개별 트랜잭션으로 처리해서 하나가 실패(중복 merchantId 등)해도
+// 나머지는 계속 등록되고, 항목별 성공/실패를 그대로 돌려준다.
+async function bulkCreateStores(items) {
+  const results = []
+  for (const item of items) {
+    const merchantId = String(item.merchantId ?? '').trim()
+    const name = String(item.name ?? '').trim()
+    const businessNumber = String(item.businessNumber ?? '').trim()
+    if (!merchantId || !name) {
+      results.push({ merchantId, ok: false, error: 'merchantId/name이 필요합니다.' })
+      continue
+    }
+    try {
+      const store = await createStore({ merchantId, name, businessNumber })
+      results.push({ merchantId, ok: true, store })
+    } catch (e) {
+      results.push({ merchantId, ok: false, error: '이미 등록된 merchantId이거나 저장에 실패했습니다.' })
+    }
+  }
+  return results
+}
+
+function getStore(id) {
+  return prisma.store.findUnique({ where: { id } })
+}
+
+function findStoreByMerchantId(merchantId) {
+  if (merchantId === undefined || merchantId === null || merchantId === '') return null
+  return prisma.store.findUnique({ where: { merchantId: String(merchantId) } })
+}
+
+// 매장·날짜별 원자적 채번. 트랜잭션 안에서 upsert+increment를 하나로 묶어
+// 동시에 여러 예약이 들어와도 같은 대기번호가 중복 발급되지 않게 한다.
+async function nextQueueNumber(storeId) {
   const today = new Date().toISOString().slice(0, 10)
-  if (dailyQueueDate !== today) {
-    dailyQueueDate = today
-    dailyQueueCounter = 0
-  }
-  dailyQueueCounter += 1
-  return dailyQueueCounter
+  return prisma.$transaction(async (tx) => {
+    const existing = await tx.queueCounter.findUnique({
+      where: { storeId_date: { storeId, date: today } },
+    })
+    if (existing) {
+      const updated = await tx.queueCounter.update({
+        where: { id: existing.id },
+        data: { counter: { increment: 1 } },
+      })
+      return updated.counter
+    }
+    const created = await tx.queueCounter.create({
+      data: { storeId, date: today, counter: 1 },
+    })
+    return created.counter
+  })
 }
 
-function createReservation({ carNumber, phone, serviceType }) {
-  const reservation = {
-    id: randomUUID(),
-    carNumber,
-    phone,
-    serviceType,
-    queueNumber: nextQueueNumber(),
-    status: 'waiting', // waiting -> called(알림톡 발송 완료)/notify_failed -> completed(정비완료, 관리자가 직접 처리)
-    createdAt: new Date().toISOString(),
-    calledAt: null,
-    completedAt: null,
-  }
-  reservations.push(reservation)
-  return reservation
+async function createReservation({ storeId, carNumber, phone, serviceType }) {
+  const queueNumber = await nextQueueNumber(storeId)
+  return prisma.reservation.create({
+    data: { storeId, carNumber, phone, serviceType, queueNumber, status: 'waiting' },
+  })
 }
 
-function listReservations() {
-  return reservations
+// storeId를 안 넘기면(관리자 "전체 매장 보기") 전체를 반환한다.
+function listReservations(storeId) {
+  return prisma.reservation.findMany({
+    where: storeId ? { storeId } : undefined,
+    orderBy: { createdAt: 'asc' },
+  })
 }
 
-function getNextWaitingReservation() {
-  return reservations.find((r) => r.status === 'waiting') ?? null
+// store를 함께 로드해 알림톡 발송 시 #{매장명}을 채울 수 있게 한다 (Phase 4).
+function getNextWaitingReservation(storeId) {
+  return prisma.reservation.findFirst({
+    where: { storeId, status: 'waiting' },
+    orderBy: { createdAt: 'asc' },
+    include: { store: true },
+  })
 }
 
 function getReservation(id) {
-  return reservations.find((r) => r.id === id) ?? null
+  return prisma.reservation.findUnique({ where: { id }, include: { store: true } })
 }
 
-function deleteReservation(id) {
-  const index = reservations.findIndex((r) => r.id === id)
-  if (index === -1) return false
-  reservations.splice(index, 1)
-  return true
+async function deleteReservation(id) {
+  try {
+    await prisma.reservation.delete({ where: { id } })
+    return true
+  } catch {
+    return false
+  }
 }
 
-function markReservationCalled(id) {
-  const reservation = reservations.find((r) => r.id === id)
-  if (!reservation) return null
-  reservation.status = 'called'
-  reservation.calledAt = new Date().toISOString()
-  return reservation
+async function markReservationCalled(id) {
+  try {
+    return await prisma.reservation.update({
+      where: { id },
+      data: { status: 'called', calledAt: new Date() },
+    })
+  } catch {
+    return null
+  }
 }
 
 // 정비가 끝나 정비 베이(자리)가 비었다는 뜻. 관리자가 직접 처리해야 한다 — 알림톡 발송 성공/실패와는
 // 별개로, 이걸 눌러야 다음 예약이 "앞에 아무도 없음"으로 계산되어 자동 호출되거나 대기인원이 줄어든다.
-function markReservationCompleted(id) {
-  const reservation = reservations.find((r) => r.id === id)
-  if (!reservation) return null
-  reservation.status = 'completed'
-  reservation.completedAt = new Date().toISOString()
-  return reservation
+async function markReservationCompleted(id) {
+  try {
+    return await prisma.reservation.update({
+      where: { id },
+      data: { status: 'completed', completedAt: new Date() },
+    })
+  } catch {
+    return null
+  }
+}
+
+async function markReservationNotifyFailed(id) {
+  try {
+    return await prisma.reservation.update({ where: { id }, data: { status: 'notify_failed' } })
+  } catch {
+    return null
+  }
+}
+
+async function markPaymentStatus(id, status) {
+  try {
+    return await prisma.payment.update({ where: { id }, data: { status } })
+  } catch {
+    return null
+  }
 }
 
 // 결제 화면에서 차량번호를 다시 입력받는 대신, 전화번호로 이 손님의 예약 기록을 찾아
-// 차량번호/정비항목을 그대로 가져다 쓴다. 오늘 등록한 예약을 우선하고(같은 날 재방문 등으로
-// 여러 건이 있어도 최신 것 사용), 오늘 것이 없으면 그 번호로 등록된 가장 최근 예약을 쓴다.
-function findLatestReservationByPhone(phone) {
-  const matches = reservations.filter((r) => r.phone === phone)
-  if (!matches.length) return null
+// 차량번호/정비항목을 그대로 가져다 쓴다. 같은 매장(storeId) 안에서만 찾는다 — 다른 매장에
+// 등록된 동일 전화번호 예약을 잘못 가져오면 안 되기 때문이다.
+// 오늘 등록한 예약을 우선하고(같은 날 재방문 등으로 여러 건이 있어도 최신 것 사용),
+// 오늘 것이 없으면 그 번호로 등록된 가장 최근 예약을 쓴다.
+async function findLatestReservationByPhone(storeId, phone) {
   const today = new Date().toISOString().slice(0, 10)
-  const todayMatches = matches.filter((r) => r.createdAt.slice(0, 10) === today)
-  const pool = todayMatches.length ? todayMatches : matches
-  return pool[pool.length - 1]
+  const todayStart = new Date(`${today}T00:00:00.000Z`)
+  const todayMatch = await prisma.reservation.findFirst({
+    where: { storeId, phone, createdAt: { gte: todayStart } },
+    orderBy: { createdAt: 'desc' },
+  })
+  if (todayMatch) return todayMatch
+  return prisma.reservation.findFirst({
+    where: { storeId, phone },
+    orderBy: { createdAt: 'desc' },
+  })
 }
 
 const THREE_MONTHS_MS = 90 * 24 * 60 * 60 * 1000
 
 function findPaymentByKey(paymentKey) {
   if (!paymentKey) return null
-  return payments.find((p) => p.paymentKey === paymentKey) ?? null
+  return prisma.payment.findUnique({ where: { paymentKey } })
 }
 
-function createPayment({ paymentKey, carNumber, serviceType, phone, amount }) {
-  const now = new Date()
-  const payment = {
-    id: randomUUID(),
-    paymentKey: paymentKey || null,
-    carNumber: carNumber || null,
-    serviceType: serviceType || null,
-    phone,
-    amount: amount ?? null,
-    status: 'requested', // requested -> receipt_sent / receipt_failed
-    promoAt: new Date(now.getTime() + THREE_MONTHS_MS).toISOString(),
-    promoSent: false,
-    promoSentAt: null,
-    createdAt: now.toISOString(),
-  }
-  payments.push(payment)
-  return payment
+function createPayment({ storeId, paymentKey, carNumber, serviceType, phone, amount }) {
+  return prisma.payment.create({
+    data: {
+      storeId,
+      paymentKey: paymentKey || null,
+      carNumber: carNumber || null,
+      serviceType: serviceType || null,
+      phone,
+      amount: amount ?? null,
+      status: 'requested',
+      promoAt: new Date(Date.now() + THREE_MONTHS_MS),
+    },
+  })
 }
 
-function listPayments() {
-  return payments
+// storeId를 안 넘기면(관리자 "전체 매장 보기") 전체를 반환한다.
+function listPayments(storeId) {
+  return prisma.payment.findMany({
+    where: storeId ? { storeId } : undefined,
+    orderBy: { createdAt: 'asc' },
+  })
 }
 
 function listDuePromotions() {
-  const now = Date.now()
-  return payments.filter((p) => !p.promoSent && new Date(p.promoAt).getTime() <= now)
+  return prisma.payment.findMany({
+    where: { promoSent: false, promoAt: { lte: new Date() } },
+    include: { store: true },
+  })
 }
 
-function markPromoSent(id) {
-  const payment = payments.find((p) => p.id === id)
-  if (!payment) return null
-  payment.promoSent = true
-  payment.promoSentAt = new Date().toISOString()
-  return payment
+async function markPromoSent(id) {
+  try {
+    return await prisma.payment.update({
+      where: { id },
+      data: { promoSent: true, promoSentAt: new Date() },
+    })
+  } catch {
+    return null
+  }
+}
+
+// 웹훅 중복 수신 방지. 이미 처리한 x-toss-webhook-id면 false(스킵), 처음 보는 id면 기록하고 true.
+async function recordWebhookEventOnce(webhookId, eventType) {
+  try {
+    await prisma.webhookEvent.create({ data: { id: webhookId, eventType } })
+    return true
+  } catch {
+    return false // unique 제약 위반 = 이미 처리된 이벤트
+  }
 }
 
 module.exports = {
+  ensureDefaultStore,
+  ensureDefaultHqAdmin,
+  bulkCreateStores,
+  recordWebhookEventOnce,
+  findAdminUserByEmail,
+  getAdminUser,
+  createAdminUser,
+  markAdminLogin,
+  createStore,
+  listStores,
+  getStore,
+  findStoreByMerchantId,
   createReservation,
   listReservations,
   getNextWaitingReservation,
@@ -137,9 +305,11 @@ module.exports = {
   deleteReservation,
   markReservationCalled,
   markReservationCompleted,
+  markReservationNotifyFailed,
   findLatestReservationByPhone,
   createPayment,
   findPaymentByKey,
+  markPaymentStatus,
   listPayments,
   listDuePromotions,
   markPromoSent,

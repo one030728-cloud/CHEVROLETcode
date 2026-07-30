@@ -1,0 +1,17 @@
+{
+  "$schemaVersion": 2,
+  "sessions": {
+    "24d9e9e0-ec8d-47e5-94d0-1a0a51e9a1dc": {
+      "feature": "multi-store-support",
+      "phase": null,
+      "action": null,
+      "timestamp": "2026-07-30T02:51:54.473Z"
+    },
+    "d24c8e01-016c-47fc-8b3f-f9df2b755f2b": {
+      "feature": "multi-store-support",
+      "phase": "check",
+      "action": null,
+      "timestamp": "2026-07-30T02:51:55.597Z"
+    }
+  }
+}
