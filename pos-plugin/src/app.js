@@ -11,6 +11,12 @@ const STATUS_LABEL = { waiting: '대기중', called: '호출완료', notify_fail
 
 const listEl = document.getElementById('list')
 const storeNameEl = document.getElementById('store-name')
+const waitingCountEl = document.getElementById('waiting-count')
+const nextNumberEl = document.getElementById('next-number')
+const lastUpdatedEl = document.getElementById('last-updated')
+const connectionDotEl = document.getElementById('connection-dot')
+const refreshButtonEl = document.getElementById('refresh-button')
+const pageStatusEl = document.getElementById('page-status')
 
 let merchantId = null
 let pollTimer = null
@@ -33,6 +39,23 @@ function notify(kind, message) {
   } else {
     alert(message)
   }
+  pageStatusEl.textContent = message
+}
+
+function setConnection(state) {
+  connectionDotEl.className = `connection-dot ${state === 'online' ? '' : state}`.trim()
+  connectionDotEl.title = state === 'online' ? '서버 연결됨' : state === 'checking' ? '서버 확인 중' : '서버 연결 오류'
+}
+
+function updateSummary(reservations) {
+  const waiting = reservations.filter((reservation) => reservation.status === 'waiting')
+  waitingCountEl.textContent = String(waiting.length)
+  nextNumberEl.textContent = waiting.length ? `#${waiting[0].queueNumber}` : '—'
+}
+
+function updateLastUpdated() {
+  const time = new Intl.DateTimeFormat('ko-KR', { hour: '2-digit', minute: '2-digit' }).format(new Date())
+  lastUpdatedEl.textContent = `${time} 기준 · 5초마다 자동 업데이트`
 }
 
 async function apiGet(path) {
@@ -91,8 +114,23 @@ let lastReservations = []
 
 function render(reservations) {
   lastReservations = reservations
+  updateSummary(reservations)
+  updateLastUpdated()
+  pageStatusEl.textContent = `대기열 ${reservations.length}건을 불러왔습니다.`
+
+  const activeIds = new Set(reservations.map((reservation) => reservation.id))
+  confirming.forEach((_, id) => {
+    if (!activeIds.has(id)) clearConfirm(id)
+  })
+
   if (!reservations.length) {
-    listEl.innerHTML = `<div class="empty"><div class="empty-title">대기중인 손님이 없습니다</div>새 예약이 들어오면 여기에 표시됩니다.</div>`
+    listEl.innerHTML = `
+      <div class="empty">
+        <div class="empty-mark" aria-hidden="true">✓</div>
+        <div class="empty-title">대기중인 손님이 없습니다</div>
+        <div class="empty-copy">새 예약이 들어오면 이곳에 표시됩니다.</div>
+      </div>
+    `
     return
   }
   listEl.innerHTML = reservations
@@ -102,29 +140,47 @@ function render(reservations) {
       const completeConfirming = state?.action === 'complete'
       const canCall = r.status === 'waiting'
       const canComplete = r.status === 'called' || r.status === 'notify_failed'
+      const statusClass = ['waiting', 'called', 'notify_failed'].includes(r.status) ? r.status : 'waiting'
+      const statusLabel = STATUS_LABEL[r.status] || r.status
       return `
-        <div class="row">
-          <div class="num">#${r.queueNumber}</div>
-          <div class="info">
-            <div class="car">${escapeHtml(r.carNumber)} <span class="badge ${r.status}">${STATUS_LABEL[r.status] || r.status}</span></div>
-            <div class="sub">${escapeHtml(r.serviceType || '-')}</div>
+        <article class="queue-item status-${statusClass}">
+          <div class="queue-number">#${r.queueNumber}</div>
+          <div class="queue-main">
+            <div class="queue-top">
+              <strong class="car-number">${escapeHtml(r.carNumber)}</strong>
+              <span class="badge ${statusClass}">${escapeHtml(statusLabel)}</span>
+            </div>
+            <div class="service">${escapeHtml(r.serviceType || '-')}</div>
           </div>
           <div class="actions">
             <button
-              class="${callConfirming ? 'confirm' : ''}"
-              data-id="${r.id}" data-action="call"
+              class="action-button ${callConfirming ? 'confirm' : ''}"
+              data-id="${escapeHtml(r.id)}" data-action="call"
+              aria-label="${callConfirming ? '호출 확정' : '호출'} ${escapeHtml(r.carNumber)}"
               ${canCall ? '' : 'disabled'}
-            >${callConfirming ? '확정' : '호출'}</button>
+            >${callConfirming ? '호출 확정' : '호출'}</button>
             <button
-              class="complete ${completeConfirming ? 'confirm' : ''}"
-              data-id="${r.id}" data-action="complete"
+              class="action-button complete ${completeConfirming ? 'confirm' : ''}"
+              data-id="${escapeHtml(r.id)}" data-action="complete"
+              aria-label="${completeConfirming ? '완료 확정' : '완료'} ${escapeHtml(r.carNumber)}"
               ${canComplete ? '' : 'disabled'}
-            >${completeConfirming ? '확정' : '완료'}</button>
+            >${completeConfirming ? '완료 확정' : '완료'}</button>
           </div>
-        </div>
+        </article>
       `
     })
     .join('')
+}
+
+function renderError(message) {
+  listEl.innerHTML = `
+    <div class="error-card">
+      <div class="error-mark" aria-hidden="true">!</div>
+      <div class="error-title">대기열을 불러오지 못했습니다</div>
+      <div class="error-copy">${escapeHtml(message)}</div>
+    </div>
+  `
+  updateSummary([])
 }
 
 function escapeHtml(s) {
@@ -137,20 +193,48 @@ listEl.addEventListener('click', (e) => {
   handleActionClick(btn.dataset.id, btn.dataset.action)
 })
 
-async function loadQueue() {
-  const { ok, body } = await apiGet(`/api/pos/queue?merchantId=${encodeURIComponent(merchantId)}`)
-  if (!ok) return
-  render(body.reservations || [])
+async function loadQueue({ manual = false } = {}) {
+  if (manual || !lastReservations.length) setConnection('checking')
+  try {
+    const { ok, body } = await apiGet(`/api/pos/queue?merchantId=${encodeURIComponent(merchantId)}`)
+    if (!ok) {
+      setConnection('error')
+      if (!lastReservations.length) renderError(body.error || '서버에서 대기열을 확인할 수 없습니다.')
+      return false
+    }
+    setConnection('online')
+    render(body.reservations || [])
+    return true
+  } catch {
+    setConnection('error')
+    if (!lastReservations.length) renderError('네트워크 연결을 확인한 뒤 다시 시도해주세요.')
+    return false
+  }
 }
 
-async function main() {
-  const merchant = await getMerchant()
-  merchantId = merchant.id
-  storeNameEl.textContent = merchant.name || ''
+refreshButtonEl.addEventListener('click', async () => {
+  refreshButtonEl.disabled = true
+  try {
+    await loadQueue({ manual: true })
+  } finally {
+    refreshButtonEl.disabled = false
+  }
+})
 
-  await loadQueue()
-  if (pollTimer) clearInterval(pollTimer)
-  pollTimer = setInterval(loadQueue, 5000)
+async function main() {
+  try {
+    const merchant = await getMerchant()
+    if (!merchant?.id && merchant?.id !== 0) throw new Error('매장 정보를 확인할 수 없습니다.')
+    merchantId = merchant.id
+    storeNameEl.textContent = merchant.name || '연결된 매장'
+
+    await loadQueue()
+    if (pollTimer) clearInterval(pollTimer)
+    pollTimer = setInterval(loadQueue, 5000)
+  } catch (error) {
+    setConnection('error')
+    renderError(error.message || '매장 정보를 확인할 수 없습니다.')
+  }
 }
 
 main()
