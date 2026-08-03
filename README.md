@@ -24,6 +24,7 @@
 - [환경 변수 / 알림톡 설정](#환경-변수--알림톡-설정)
 - [Render 배포](#render-배포)
 - [GCP 이전 및 트래픽 확장 계획](docs/gcp-migration-and-scale-plan.md)
+- [TODO](TODO.md)
 - [알려진 제한사항 & 다음 단계](#알려진-제한사항--다음-단계)
 
 ## 개요
