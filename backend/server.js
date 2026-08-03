@@ -213,7 +213,7 @@ const paymentLimiter = rateLimit({
 })
 
 // 대기중인 예약을 호출 처리하고 "순서입니다" 알림톡을 보낸다.
-// /api/queue/call-next(관리자가 수동 호출)와 예약 접수 시 대기인원이 0명이라 바로 호출되는 경우 둘 다에서 쓴다.
+// 예약 접수 자체는 호출로 취급하지 않으며, 관리자/POS의 수동 호출 API에서만 이 함수를 쓴다.
 // DB 업데이트와 별개로, 호출부(server.js)가 응답 본문을 만들 때 쓰는 로컬 reservation 객체의
 // status도 함께 갱신해준다 — 인메모리 시절엔 같은 객체를 참조해서 자동으로 반영됐지만
 // Prisma는 매번 새 객체를 반환하므로 명시적으로 맞춰줘야 한다.
@@ -238,10 +238,11 @@ async function notifyQueueTurn(reservation) {
 // --- 예약(대기순번) ---
 // 차량번호 + 전화번호를 등록하고 대기번호를 발급한다.
 // "앞에 몇 명 있는지"는 status가 'completed'가 아닌(=아직 정비가 안 끝난) 예약 수로 센다.
-// 단순히 'waiting'만 세면, 이미 호출됐지만 아직 정비 중인 손님을 무시하고 계속 자동 호출이 발생한다
+// 단순히 'waiting'만 세면, 이미 호출됐지만 아직 정비 중인 손님을 무시하고 대기인원을 잘못 계산한다
 // (정비 베이가 몇 개 비었는지는 모르니, 관리자가 /api/reservations/:id/complete로 "정비완료"를
 // 눌러줘야 그 손님이 앞에서 빠진다).
-// 앞에 아무도 없으면 곧바로 "순서입니다" 알림톡을 보내고, 있으면 "몇 명 남았는지"를 안내하는 접수 알림톡을 보낸다.
+// 예약 접수 시에는 앞에 사람이 없더라도 항상 waiting 상태로 두고 접수 알림톡만 보낸다.
+// 실제 호출은 직원이 POS/관리자 화면에서 명시적으로 눌렀을 때만 발생한다.
 app.post('/api/reservations', reservationLimiter, requireStore, async (req, res) => {
   try {
     const storeId = req.store.id
@@ -263,22 +264,18 @@ app.post('/api/reservations', reservationLimiter, requireStore, async (req, res)
     const { reservation, peopleAhead } = await createReservation({ storeId, carNumber, phone, serviceType })
     reservation.store = req.store // notifyQueueTurn/알림톡에서 #{매장명}으로 쓰기 위해 붙여둔다
 
-    if (peopleAhead === 0) {
-      await notifyQueueTurn(reservation)
-    } else {
-      try {
-        await sendReservationAlimtalk({
-          phone,
-          carNumber,
-          queueNumber: reservation.queueNumber,
-          peopleAhead,
-          serviceType,
-          storeName: req.store.name,
-        })
-      } catch (notifyError) {
-        console.error(`예약 접수 알림 발송 실패 [예약 id=${reservation.id}]:`, notifyError.message)
-        // 접수 안내 알림 발송에 실패해도 손님은 여전히 대기중이므로 status는 바꾸지 않는다.
-      }
+    try {
+      await sendReservationAlimtalk({
+        phone,
+        carNumber,
+        queueNumber: reservation.queueNumber,
+        peopleAhead,
+        serviceType,
+        storeName: req.store.name,
+      })
+    } catch (notifyError) {
+      console.error(`예약 접수 알림 발송 실패 [예약 id=${reservation.id}]:`, notifyError.message)
+      // 접수 안내 알림 발송에 실패해도 손님은 여전히 대기중이므로 status는 바꾸지 않는다.
     }
 
     return res.json({
@@ -341,7 +338,7 @@ app.delete('/api/reservations/:id', requireAuth, async (req, res) => {
 })
 
 // 정비가 끝났음을 표시한다 (관리자 전용). 이걸 눌러야 이 손님이 "앞에 있는 사람" 계산에서 빠져서
-// 다음 예약이 자동 호출되거나 대기인원 안내에서 한 명 줄어든다.
+// 다음 예약의 대기인원 안내가 한 명 줄어든다.
 app.post('/api/reservations/:id/complete', requireAuth, async (req, res) => {
   const existing = await getReservation(req.params.id)
   if (!existing) {

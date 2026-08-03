@@ -41,12 +41,15 @@ async function sendAlimtalk({ phone, text, templateId, variables }) {
 // #{매장명} 변수로만 한다. 매장별 발신번호가 필요해지면(프랜차이즈 개별 사업자 전환 시) 이 함수들에
 // storeId 인자를 추가해 store.phone_sender를 조회하도록 확장하면 된다.
 
-// 예약 접수 완료 (대기번호 발급). 이 시점에 앞서 정비완료 처리가 안 된 예약이 있을 때만 호출된다
-// (앞에 아무도 없으면 서버에서 바로 sendQueueTurnAlimtalk로 순서 호출을 보낸다).
+// 예약 접수 완료 (대기번호 발급). 앞에 대기자가 없어도 호출 알림은 보내지 않고
+// 모든 예약에 접수 알림만 보낸다. 순서 호출은 직원의 명시적인 호출 동작에서만 보낸다.
 async function sendReservationAlimtalk({ phone, carNumber, queueNumber, peopleAhead, serviceType, storeName }) {
+  const waitingMessage = peopleAhead === 0
+    ? '현재 대기 중이며 직원 호출 후 순서 안내를 드립니다.'
+    : `앞으로 ${peopleAhead}명 남았습니다.`
   return sendAlimtalk({
     phone,
-    text: `[${storeName || '예약 접수'}]\n차량번호 ${carNumber} · ${serviceType} 예약이 접수되었습니다.\n대기번호 ${queueNumber}번, 앞으로 ${peopleAhead}명 남았습니다.`,
+    text: `[${storeName || '예약 접수'}]\n차량번호 ${carNumber} · ${serviceType} 예약이 접수되었습니다.\n대기번호 ${queueNumber}번, ${waitingMessage}`,
     templateId: process.env.SOLAPI_KAKAO_TEMPLATE_RESERVATION,
     variables: {
       '#{매장명}': storeName || '',

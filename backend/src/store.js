@@ -191,7 +191,7 @@ async function markReservationCalled(id) {
 }
 
 // 정비가 끝나 정비 베이(자리)가 비었다는 뜻. 관리자가 직접 처리해야 한다 — 알림톡 발송 성공/실패와는
-// 별개로, 이걸 눌러야 다음 예약이 "앞에 아무도 없음"으로 계산되어 자동 호출되거나 대기인원이 줄어든다.
+// 별개로, 이걸 눌러야 다음 예약의 앞사람 계산에서 빠져 대기인원이 줄어든다.
 async function markReservationCompleted(id) {
   try {
     return await prisma.reservation.update({

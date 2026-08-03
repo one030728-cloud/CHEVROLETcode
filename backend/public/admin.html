@@ -237,7 +237,7 @@
   </div>
 
   <details class="testform">
-    <summary>테스트 예약 생성 (실제 손님 예약과 동일하게 접수 알림/순서 호출이 발송됩니다)</summary>
+    <summary>테스트 예약 생성 (실제 손님 예약과 동일하게 접수 알림이 발송됩니다)</summary>
     <div class="testform-body">
       <input type="text" id="test-car" placeholder="차량번호 (예: 12가3456)" maxlength="8" />
       <select id="test-service"></select>
@@ -745,9 +745,7 @@ testSubmitBtn.addEventListener('click', async () => {
       testMsg.className = 'testform-msg err'
       return
     }
-    testMsg.textContent = body.peopleAhead === 0
-      ? `등록 완료 (#${body.queueNumber} · ${body.serviceType}) · 대기중인 손님이 없어 바로 순서 호출 알림이 발송됩니다.`
-      : `등록 완료 (#${body.queueNumber} · ${body.serviceType}) · 앞으로 ${body.peopleAhead}명 남았다는 접수 알림이 발송됩니다.`
+    testMsg.textContent = `등록 완료 (#${body.queueNumber} · ${body.serviceType}) · 앞으로 ${body.peopleAhead}명 남았다는 접수 알림이 발송됩니다. 호출은 POS/관리자 화면에서 직접 눌러주세요.`
     testMsg.className = 'testform-msg ok'
     testCarInput.value = ''
     testPhoneInput.value = ''
