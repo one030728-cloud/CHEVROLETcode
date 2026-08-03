@@ -23,6 +23,7 @@
 - [토스프론트 플러그인 연동](#토스프론트-플러그인-연동)
 - [환경 변수 / 알림톡 설정](#환경-변수--알림톡-설정)
 - [Render 배포](#render-배포)
+- [GCP 이전 및 트래픽 확장 계획](docs/gcp-migration-and-scale-plan.md)
 - [알려진 제한사항 & 다음 단계](#알려진-제한사항--다음-단계)
 
 ## 개요
@@ -306,15 +307,20 @@ SOLAPI_KAKAO_TEMPLATE_PROMO=         # 결제 3개월 후 홍보
 이미 https://chevroletcode.onrender.com 에 연결되어 있습니다. 새로 설정할 경우:
 
 1. Render → New → Web Service → 이 저장소(`one030728-cloud/CHEVROLETcode`) 연결
-2. Root Directory: `backend`
-3. Build Command: `npm install`
-4. Start Command: `npm start`
+2. Root Directory: 비워두기 (저장소 루트)
+3. Build Command: `cd backend && npm install && npx prisma migrate deploy && cd ../pos-plugin && npm install && npm run build`
+4. Start Command: `cd backend && npm start`
 5. Environment 탭에서 위 `DATABASE_URL`(Postgres 연결 문자열 — Render 무료 플랜은 재배포 시 로컬 파일이 초기화되므로
    SQLite가 아니라 반드시 외부 Postgres 사용), `JWT_SECRET`, `ADMIN_BOOTSTRAP_*`, `SOLAPI_*` 키들을 등록
 6. `main` 브랜치에 push하면 Render가 자동 재배포합니다 (Auto-Deploy 켜져 있는 경우)
 
 > ⚠️ Render 무료 플랜은 트래픽이 없으면 슬립 상태가 되어 오전 10시 프로모션 스케줄러가 안 돌 수 있습니다.
 > 이 문제를 없애려면 유료 플랜(항상 켜짐) 또는 외부 크론(예: cron-job.org가 `/healthz`를 주기적으로 호출)이 필요합니다.
+
+## GCP 이전 및 트래픽 확장 계획
+
+SQLite를 PostgreSQL로 바꾸고 Cloud Run에서 확장하기 위한 순서와 검증 체크리스트는
+[`docs/gcp-migration-and-scale-plan.md`](docs/gcp-migration-and-scale-plan.md)에 정리되어 있습니다.
 
 ## 알려진 제한사항 & 다음 단계
 
