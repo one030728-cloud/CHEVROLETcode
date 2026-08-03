@@ -10,6 +10,16 @@ const { hashPassword } = require('./auth')
 
 const prisma = new PrismaClient()
 
+// 매장 영업일은 한국 시간(KST, UTC+9) 자정 기준으로 리셋되어야 한다. `new Date().toISOString()`을
+// 그대로 쓰면 UTC 자정(=KST 오전 9시) 기준이 되어 새벽 시간대 예약의 날짜 경계가 어긋난다.
+function kstDateString(d = new Date()) {
+  return new Date(d.getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10)
+}
+
+function kstDayStartUtc(dateStr) {
+  return new Date(`${dateStr}T00:00:00+09:00`)
+}
+
 // Plan SC: FR-07 — 최초 부팅 시 본사(hq_admin) 계정이 하나도 없으면 자동 생성한다.
 // 비밀번호는 ADMIN_BOOTSTRAP_PASSWORD가 있으면 그 값을, 없으면 무작위로 생성해 콘솔에 한 번만 출력한다.
 async function ensureDefaultHqAdmin() {
@@ -109,32 +119,33 @@ function findStoreByMerchantId(merchantId) {
   return prisma.store.findUnique({ where: { merchantId: String(merchantId) } })
 }
 
-// 매장·날짜별 원자적 채번. 트랜잭션 안에서 upsert+increment를 하나로 묶어
-// 동시에 여러 예약이 들어와도 같은 대기번호가 중복 발급되지 않게 한다.
-async function nextQueueNumber(storeId) {
-  const today = new Date().toISOString().slice(0, 10)
+// 매장·날짜별 원자적 채번 + "앞에 몇 명 있는지" 계산 + 예약 생성을 하나의 트랜잭션으로 묶는다.
+// 예전엔 server.js가 (인원수 조회) -> (예약 생성)을 별도 호출로 나눠서 했는데, 그 사이에 다른 요청이
+// 끼어들면 두 손님이 동시에 "앞에 아무도 없음(peopleAhead=0)"으로 계산되어 둘 다 순서 호출 알림톡을
+// 받는 경쟁 상태가 있었다. SQLite/Prisma 트랜잭션 안에서 카운트→채번→생성을 순서대로 묶으면
+// 같은 트랜잭션이 끝나기 전까지 다른 트랜잭션이 끼어들 수 없어 안전해진다.
+async function createReservation({ storeId, carNumber, phone, serviceType }) {
+  const today = kstDateString()
   return prisma.$transaction(async (tx) => {
-    const existing = await tx.queueCounter.findUnique({
+    const peopleAhead = await tx.reservation.count({
+      where: { storeId, status: { not: 'completed' } },
+    })
+
+    const existingCounter = await tx.queueCounter.findUnique({
       where: { storeId_date: { storeId, date: today } },
     })
-    if (existing) {
-      const updated = await tx.queueCounter.update({
-        where: { id: existing.id },
-        data: { counter: { increment: 1 } },
-      })
-      return updated.counter
-    }
-    const created = await tx.queueCounter.create({
-      data: { storeId, date: today, counter: 1 },
-    })
-    return created.counter
-  })
-}
+    const queueNumber = existingCounter
+      ? (await tx.queueCounter.update({
+          where: { id: existingCounter.id },
+          data: { counter: { increment: 1 } },
+        })).counter
+      : (await tx.queueCounter.create({ data: { storeId, date: today, counter: 1 } })).counter
 
-async function createReservation({ storeId, carNumber, phone, serviceType }) {
-  const queueNumber = await nextQueueNumber(storeId)
-  return prisma.reservation.create({
-    data: { storeId, carNumber, phone, serviceType, queueNumber, status: 'waiting' },
+    const reservation = await tx.reservation.create({
+      data: { storeId, carNumber, phone, serviceType, queueNumber, status: 'waiting' },
+    })
+
+    return { reservation, peopleAhead }
   })
 }
 
@@ -214,8 +225,7 @@ async function markPaymentStatus(id, status) {
 // 오늘 등록한 예약을 우선하고(같은 날 재방문 등으로 여러 건이 있어도 최신 것 사용),
 // 오늘 것이 없으면 그 번호로 등록된 가장 최근 예약을 쓴다.
 async function findLatestReservationByPhone(storeId, phone) {
-  const today = new Date().toISOString().slice(0, 10)
-  const todayStart = new Date(`${today}T00:00:00.000Z`)
+  const todayStart = kstDayStartUtc(kstDateString())
   const todayMatch = await prisma.reservation.findFirst({
     where: { storeId, phone, createdAt: { gte: todayStart } },
     orderBy: { createdAt: 'desc' },

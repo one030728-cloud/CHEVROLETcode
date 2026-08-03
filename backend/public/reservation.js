@@ -2,6 +2,9 @@ const CAR_NUMBER_RE = /^\d{2,3}[가-힣]\d{4}$/
 const PHONE_RE = /^01[0-9]{8,9}$/
 
 const mode = new URLSearchParams(location.search).get('mode') === 'payment' ? 'payment' : 'reservation'
+// 플러그인이 탭앱으로 이 페이지를 띄울 때 자기 merchantId를 쿼리파라미터로 넘겨준다
+// (예: index.html?merchantId=xxx&mode=payment). 없으면 서버가 가맹점을 식별할 수 없어 400을 반환한다.
+const merchantId = new URLSearchParams(location.search).get('merchantId') || ''
 
 const title = document.getElementById('title')
 const subtitle = document.getElementById('subtitle')
@@ -105,14 +108,18 @@ async function submitReservation() {
     phoneError.textContent = '전화번호 형식이 올바르지 않습니다.'
     return
   }
+  if (!merchantId) {
+    phoneError.textContent = '가맹점 정보가 없는 링크입니다. 담당 매장에 문의해주세요.'
+    return
+  }
 
   setSubmitting(true)
 
   try {
     const endpoint = mode === 'payment' ? '/api/payments' : '/api/reservations'
     const body = mode === 'payment'
-      ? { carNumber, phone, amount: amount || undefined }
-      : { carNumber, phone }
+      ? { carNumber, phone, amount: amount || undefined, merchantId }
+      : { carNumber, phone, merchantId }
 
     const res = await fetch(endpoint, {
       method: 'POST',

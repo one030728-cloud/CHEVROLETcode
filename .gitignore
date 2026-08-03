@@ -1,0 +1,9 @@
+# Local/generated artifacts
+*.zip
+node_modules/
+
+# Local secrets and database files (backend/.gitignore also covers these)
+.env
+backend/.env
+backend/prisma/dev.db
+backend/prisma/dev.db-journal

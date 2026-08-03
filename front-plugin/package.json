@@ -1,0 +1,12 @@
+{
+  "name": "chevrolet-toss-front-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "description": "쉐보레 토스프론트 플러그인 배포 패키지",
+  "scripts": {
+    "zip": "powershell -NoProfile -ExecutionPolicy Bypass -File package.ps1"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

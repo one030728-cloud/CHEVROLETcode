@@ -49,11 +49,23 @@ if (!process.env.JWT_SECRET) {
 }
 
 const app = express()
+// Render/GCP(Cloud Run 등) 모두 로드밸런서 뒤에서 X-Forwarded-For를 붙여 전달한다.
+// trust proxy를 설정하지 않으면 express-rate-limit이 개별 클라이언트가 아니라
+// 매장 전체 트래픽을 하나로 묶어 레이트리밋을 적용해버린다. 홉 수는 배포 플랫폼마다
+// 다를 수 있어 하드코딩하지 않고 TRUST_PROXY_HOPS로 뺀다 (기본 1홉: 대부분의 PaaS 로드밸런서).
+app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS ?? 1))
 app.use(cors())
 // 웹훅 서명 검증(HMAC)은 재직렬화한 JSON이 아니라 원본 바이트가 필요해서, verify 훅으로
 // req.rawBody에 원본을 남겨둔다 (POST /api/webhooks/toss/payment에서 사용).
 app.use(express.json({ verify: (req, res, buf) => { req.rawBody = buf } }))
 app.use(express.static(path.join(__dirname, 'public')))
+// 토스프론트 플러그인(../front-plugin)과 토스 POS 탭앱(../pos-plugin)은 각각 독립된 프로젝트 폴더로
+// 분리되어 있고, 이 백엔드가 API 서버 역할과 함께 로컬 미리보기용 정적 파일 서빙도 겸한다.
+// front-plugin은 빌드가 필요 없는 순수 HTML/JS라 소스 폴더를 그대로 서빙하고,
+// pos-plugin은 esbuild 번들이 필요해 dist/ 결과물만 서빙한다(pos-plugin/README.md 참고).
+// 실제 배포(토스플레이스 개발자센터 업로드)는 이 서빙 경로와 무관하다 — 로컬 확인 전용.
+app.use('/toss-plugin', express.static(path.join(__dirname, '..', 'front-plugin')))
+app.use('/pos-plugin', express.static(path.join(__dirname, '..', 'pos-plugin', 'dist')))
 
 const CAR_NUMBER_RE = /^\d{2,3}[가-힣]\d{4}$/
 const PHONE_RE = /^01[0-9]{8,9}$/
@@ -248,9 +260,7 @@ app.post('/api/reservations', reservationLimiter, requireStore, async (req, res)
     }
     const serviceType = SERVICE_TYPES[serviceTypeKey]
 
-    const currentReservations = await listReservations(storeId)
-    const peopleAhead = currentReservations.filter((r) => r.status !== 'completed').length
-    const reservation = await createReservation({ storeId, carNumber, phone, serviceType })
+    const { reservation, peopleAhead } = await createReservation({ storeId, carNumber, phone, serviceType })
     reservation.store = req.store // notifyQueueTurn/알림톡에서 #{매장명}으로 쓰기 위해 붙여둔다
 
     if (peopleAhead === 0) {
@@ -355,6 +365,51 @@ app.get('/api/reservations/failed', requireAuth, async (req, res) => {
   const storeId = resolveScopedStoreId(req)
   const failed = (await listReservations(storeId)).filter((r) => r.status === 'notify_failed')
   return res.json({ ok: true, count: failed.length, reservations: failed })
+})
+
+// --- 토스 POS 탭앱(대기열 관리) 전용 엔드포인트 ---
+// 관리자 로그인(JWT) 없이 merchantId만으로 동작한다 — POS 탭앱은 매장 단말기 안에서
+// posPluginSdk.merchant.getMerchant()로 받은 merchantId를 자동으로 실어 보내므로,
+// 이미 공개 예약/결제 API가 쓰는 것과 같은 신뢰 모델(requireStore)을 그대로 재사용한다.
+// 대기중/호출됨/알림실패 상태만 보여준다(정비완료 건은 대기열에서 빠짐).
+const posLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { ok: false, error: '요청이 너무 많습니다. 잠시 후 다시 시도해주세요.' },
+})
+
+app.get('/api/pos/queue', posLimiter, requireStore, async (req, res) => {
+  const all = await listReservations(req.store.id)
+  const active = all
+    .filter((r) => r.status !== 'completed')
+    .sort((a, b) => a.queueNumber - b.queueNumber)
+  return res.json({ ok: true, reservations: active })
+})
+
+// 특정 손님을 호출한다. POS 탭앱 쪽에서 "이 번호를 탭하면 바로 호출"이 되지 않도록
+// 반드시 명시적인 확인 동작(예: 2단계 확인 버튼) 뒤에만 이 엔드포인트를 호출해야 한다 —
+// 서버는 그 UX를 강제할 수 없으므로 프론트(탭앱) 쪽 책임이다.
+app.post('/api/pos/queue/:id/call', posLimiter, requireStore, async (req, res) => {
+  const reservation = await getReservation(req.params.id)
+  if (!reservation || reservation.storeId !== req.store.id) {
+    return res.status(404).json({ ok: false, error: '예약을 찾을 수 없습니다.' })
+  }
+  if (reservation.status !== 'waiting') {
+    return res.status(400).json({ ok: false, error: '대기중인 예약만 호출할 수 있습니다.' })
+  }
+  await notifyQueueTurn(reservation)
+  return res.json({ ok: true, id: reservation.id, status: reservation.status })
+})
+
+app.post('/api/pos/queue/:id/complete', posLimiter, requireStore, async (req, res) => {
+  const existing = await getReservation(req.params.id)
+  if (!existing || existing.storeId !== req.store.id) {
+    return res.status(404).json({ ok: false, error: '예약을 찾을 수 없습니다.' })
+  }
+  const reservation = await markReservationCompleted(req.params.id)
+  return res.json({ ok: true, id: reservation.id, status: reservation.status })
 })
 
 // --- 결제 (전자영수증 + 3개월 후 프로모션) ---

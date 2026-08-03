@@ -31,10 +31,11 @@
 
 | 버전 | 경로 | 설명 |
 | --- | --- | --- |
-| 독립 웹페이지 | `backend/public/index.html` (`?mode=payment`) | 브라우저 어디서나 접속 가능한 범용 버전 |
-| 토스프론트 플러그인 | `backend/public/toss-plugin/` | 매장 단말기(토스프론트)에서 실행되는 실제 플러그인. [토스플레이스 Front SDK](https://docs.tossplace.com/)의 Template API(`sdk.template.renderXxxPage`)와 결제 API(`sdk.payment.requestPayment`) 사용 |
+| 독립 웹페이지 | `backend/public/index.html` (`?mode=payment`) | 브라우저 어디서나 접속 가능한 범용 버전. 플러그인이 탭앱으로 띄울 땐 `?merchantId=`를 함께 넘겨야 함 |
+| 토스프론트 플러그인 | `front-plugin/` (백엔드가 `/toss-plugin` 경로로 정적 서빙) | 매장 단말기(토스프론트)에서 실행되는 실제 플러그인. [토스플레이스 Front SDK](https://docs.tossplace.com/)의 Template API(`sdk.template.renderXxxPage`)와 결제 API(`sdk.payment.requestPayment`) 사용 |
+| 토스 POS 탭앱 | [`pos-plugin/`](pos-plugin/README.md) | POS 화면에 탭으로 추가되는 정비 대기열 관리 플러그인(호출/완료). `@tossplace/pos-plugin-sdk` 기반, 별도 빌드 필요 |
 
-자세한 내용은 [토스프론트 플러그인 연동](#토스프론트-플러그인-연동) 섹션 참고.
+자세한 내용은 [토스프론트 플러그인 연동](#토스프론트-플러그인-연동) 섹션과 [`pos-plugin/README.md`](pos-plugin/README.md) 참고.
 
 ## 주요 기능
 
@@ -72,8 +73,9 @@ npm start
 ## 프로젝트 구조
 
 ```
-backend/
-  server.js               # Express 서버 (예약/결제 API, 대기순번 호출, 3개월 프로모션 스케줄러)
+backend/                    # 공유 서버 + DB — 아래 두 플러그인이 전부 이 서버 하나의 API를 호출한다
+  server.js                 # Express 서버 (예약/결제 API + /api/pos/* + 대기순번 호출 + 3개월 프로모션 스케줄러)
+                             # front-plugin/, pos-plugin/dist/ 정적 서빙도 겸함(로컬 미리보기용)
   src/
     solapi.js              # 알림톡 발송 함수 (예약안내/순서호출/영수증/프로모션 템플릿별로 분리)
     store.js                # DB 데이터 계층 (Prisma, SQLite 로컬/Postgres 운영)
@@ -81,13 +83,20 @@ backend/
   prisma/
     schema.prisma            # Store/Reservation/Payment/QueueCounter/AdminUser 모델
   public/
-    index.html, reservation.js, styles.css   # 독립 웹페이지 버전 (?mode=payment로 결제 모드)
+    index.html, reservation.js, styles.css   # 독립 웹페이지 버전 (?mode=payment로 결제 모드, ?merchantId= 필요)
     admin.html                                # 관리자 대시보드
-    toss-plugin/                              # 토스프론트 플러그인
-      index.html         # 대기화면 (예약하기/결제하기 2버튼)
-      reservation.html    # 차량번호 → 정비항목 → 전화번호 → 대기번호 (Template API)
-      payment.html         # 금액입력 → 실제 결제(sdk.payment) → 전화번호 → 영수증
-      onboarding.html, settings.html, sdk.js   # 템플릿 요구 파일 (자세한 설명은 파일 내 주석)
+
+front-plugin/                # 토스프론트 플러그인 (독립 프로젝트 폴더, 빌드 불필요)
+  index.html                # 대기화면 (예약하기/결제하기 2버튼)
+  reservation.html           # 차량번호 → 정비항목 → 전화번호 → 대기번호 (Template API)
+  payment.html                # 금액입력 → 실제 결제(sdk.payment) → 전화번호 → 영수증
+  onboarding.html, settings.html, sdk.js   # 템플릿 요구 파일 (자세한 설명은 파일 내 주석)
+  package.ps1                              # 공식 업로드용 ZIP 생성 스크립트 (npm run zip)
+
+pos-plugin/                  # 토스 POS 탭앱 (독립 프로젝트 폴더, esbuild 빌드 필요 — pos-plugin/README.md 참고)
+  src/app.js                # 대기열 조회/호출/완료 (posPluginSdk.merchant.getMerchant()로 매장 자동 식별)
+  public/, build.js          # 탭 매니페스트/빌드 스크립트 (manifest의 tab.href 포함)
+  package.ps1                # dist 빌드 + 공식 업로드용 ZIP 생성 (npm run zip)
 ```
 
 ## API
@@ -121,7 +130,7 @@ backend/
 - 모든 예약/결제 레코드는 내부 `storeId`로 스코프됩니다(Postgres/SQLite, Prisma). 대기번호(`queueNumber`)도
   매장별·날짜별로 원자적으로 독립 채번되고, 결제 화면의 전화번호→예약 매칭(`findLatestReservationByPhone`)도
   같은 매장 안에서만 찾습니다.
-- 로컬 개발/미리보기는 `toss-plugin/sdk.js`의 `merchant.id: 0` 오버라이드와 짝을 맞춰 서버가 부팅 시
+- 로컬 개발/미리보기는 `front-plugin/sdk.js`의 `merchant.id: 0` 오버라이드와 짝을 맞춰 서버가 부팅 시
   `merchantId: '0'` 테스트 매장을 자동으로 시드해둡니다.
 - **관리자 인증은 이메일/비밀번호 + JWT 2계층 구조**입니다. `hq_admin`(본사)은 전체 매장을 보고 매장/매장관리자를
   등록할 수 있고, `store_admin`(가맹점)은 로그인하는 순간 자기 `storeId`로 강제 스코프되어 다른 매장의
@@ -140,7 +149,7 @@ backend/
 
 - `serviceType`은 `엔진오일 교체`/`정기점검`/`타이어 교체·펑크수리`/`배터리 교체`/`브레이크 정비`/`기타 수리·상담` 중 하나를 가리키는 키
   (`oil`/`inspection`/`tire`/`battery`/`brake`/`etc`)입니다. 서버([server.js](backend/server.js)의 `SERVICE_TYPES`), 토스프론트 예약 화면
-  ([toss-plugin/reservation.html](backend/public/toss-plugin/reservation.html)), 관리자 페이지([admin.html](backend/public/admin.html)) 세 군데에
+  ([front-plugin/reservation.html](front-plugin/reservation.html)), 관리자 페이지([admin.html](backend/public/admin.html)) 세 군데에
   같은 목록이 하드코딩돼 있어서, 항목을 추가/변경할 땐 세 파일을 함께 고쳐야 합니다.
 - 관리자 페이지(`/admin.html`)에는 실제 손님 없이 예약을 넣어볼 수 있는 "테스트 예약 생성" 폼이 있습니다 — 대기인원 안내 문자나
   자동 호출 동작을 확인할 때 씁니다.
@@ -156,7 +165,7 @@ backend/
 
 ## 토스프론트 플러그인 연동
 
-`backend/public/toss-plugin/`이 실제 토스 결제 단말기(토스프론트)에서 돌아가는 플러그인입니다.
+`front-plugin/`이 실제 토스 결제 단말기(토스프론트)에서 돌아가는 플러그인입니다(백엔드가 `/toss-plugin` 경로로 정적 서빙).
 [토스플레이스 연동 가이드](https://docs.tossplace.com/)를 확인해서 아래 구조로 만들었습니다.
 
 - CDN에서 `https://cdn.tossplace.com/toss-front-sdk/v0/index.js`를 불러오면 전역 `window.TossFrontSDK`가 생깁니다.
@@ -182,18 +191,45 @@ backend/
 토스플레이스 개발자센터는 사업자 계정으로 로그인해야 해서 대신 진행할 수 없는 단계입니다. 문서 기준 절차는 다음과 같습니다.
 
 1. [토스플레이스 개발자센터](https://developers.tossplace.com/login)에 로그인 → **내 플러그인 → 플러그인 등록**,
-   타입은 "토스프론트"로 선택 (플러그인 이름/ID/회사명/ACL 입력)
-2. 등록하면 예제 기반 기본 플러그인이 자동 생성됨 (이 저장소의 `toss-plugin/` 코드로 교체할 부분)
+   타입은 "토스프론트"로 선택 (플러그인 이름/ID/회사명 입력). ACL에는 `https://chevroletcode.onrender.com`을 등록
+2. 등록하면 예제 기반 기본 플러그인이 자동 생성됨 (이 저장소의 `front-plugin/` 코드로 교체할 부분)
 3. **테스트 가맹점 관리**에서 기존 테스트 가맹점 선택 또는 신규 생성 → 매장고유번호/사업자번호/휴대폰번호 발급
 4. 테스트 가맹점 상세화면에서 이 플러그인 사용 여부를 켬
 5. 실제 토스프론트 단말기(또는 테스트 단말기)에서 사업자번호/매장고유번호/휴대폰번호로 온보딩
-6. 코드 수정 후 `backend/public/toss-plugin/` **폴더 안 내용물만** ZIP으로 압축 (`index.html`이 zip 최상위에 와야 함) →
+6. 코드 수정 후 `cd front-plugin && npm run zip`으로 `chevrolet-front-plugin.zip`을 생성하고
    개발자센터 **내 플러그인 → 개발 배포 → 개발용 파일 추가** → **배포** 클릭
    (개발 배포는 검수 없이 최대 5개 단말기까지 즉시 반영, 전체 단말기 반영은 검수 후 **라이브 배포**)
-7. 문의사항은 developer-support@tossplace.com
+7. 프론트 설정 → `7055` → 플러그인 업데이트 또는 토스 프론트 재시작
+8. 문의사항은 developer-support@tossplace.com
 
 > ⚠️ 프로젝트 전체(`server.js`, `.env`, `public/index.html` 등)를 통째로 압축하면 안 됩니다 — 단말기가 진짜 플러그인
 > 화면(Template API) 대신 독립 웹페이지를 잘못 로드해 키보드 겹침 등 예상치 못한 문제가 생깁니다.
+
+### 토스 POS 탭앱 배포
+
+`pos-plugin/`은 토스 POS **탭 화면(iframe 패키지)** 방식으로 구현되어 있습니다. `main.js`가 필수인
+POS 스크립트 직접 로드(UMD/웹 워커) 방식과 다르므로, 현재 ZIP에는 `main.js` 대신 다음 파일이 들어갑니다.
+
+```text
+index.html
+iframe-manifest.json   # tab.title / tab.description / tab.href: "index.html"
+bundle.js              # src/app.js 번들
+```
+
+```bash
+cd pos-plugin
+npm install
+npm run zip             # build 후 chevrolet-pos-plugin.zip 생성
+```
+
+생성된 ZIP을 개발자센터의 **내 플러그인 → 개발 배포 → 개발용 파일 추가**에 업로드하고, 테스트 POS를
+테스트 단말기로 등록한 뒤 POS를 재시작합니다. 개발 배포는 최대 5개 단말기에서 검수 없이 확인할 수
+있으며, 라이브 배포는 검수와 VAN 대리점의 플러그인 활성화가 필요합니다.
+
+공식 방식은 [POS iframe 패키지 가이드](https://docs.tossplace.com/guide/pos-integration/plugin/develop/iframe-package.html),
+[POS UMD(main.js) 가이드](https://docs.tossplace.com/guide/pos-integration/plugin/develop/umd.html),
+[프론트 개발 배포 가이드](https://docs.tossplace.com/guide/front-integration/plugin/develop/develop-environment.html)를
+기준으로 정리했습니다. 자세한 명령과 체크리스트는 각 폴더의 README를 참고하세요.
 
 <details>
 <summary>결제 완료를 서버에서 더 확실하게 받으려면 (선택, 계정/문의 필요)</summary>
@@ -315,8 +351,9 @@ SOLAPI_KAKAO_TEMPLATE_PROMO=         # 결제 3개월 후 홍보
 - **3개월 프로모션 스케줄러는 `node-cron`으로 매일 10시 실행.** 서버가 그 시각에 떠 있지 않으면(예: 무료 플랜 슬립) 그날은 건너뛰지만,
   다음 실행 때 `promoAt`이 이미 지난 건은 다시 잡혀서 발송 시도합니다 (재시도 자체는 됨, 정시 발송은 보장 안 됨).
 - **레이트리밋 적용됨.** `POST /api/reservations`는 IP당 10분에 5회, `POST /api/payments`는 10분에 10회로 제한됩니다.
-- **토스프론트 플러그인은 아직 실제 계정에 배포 안 됨.** 코드는 완성됐지만, 토스플레이스 개발자센터 플러그인 등록·테스트
-  가맹점 연결·단말기 온보딩·ZIP 배포는 사업자 계정 로그인이 필요해서 사용자가 직접 진행해야 합니다.
+- **토스프론트/POS 플러그인은 아직 실제 계정에 라이브 배포 안 됨.** 코드·ZIP 생성은 준비됐지만,
+  토스플레이스 개발자센터 플러그인 등록·테스트 가맹점/단말기 연결·개발 배포는 사업자 계정 로그인이 필요해서
+  사용자가 직접 진행해야 합니다.
 
 </details>
 
@@ -328,5 +365,6 @@ SOLAPI_KAKAO_TEMPLATE_PROMO=         # 결제 3개월 후 홍보
 - [ ] 웹훅 서명 검증 방식을 토스 담당자에게 문의해서 실제 스펙에 맞게 수정, `developer-support@tossplace.com`에 웹훅 등록 요청
 - [ ] Render 무료 플랜 슬립으로 인한 프로모션 스케줄러 미실행 문제 해결 (유료 플랜 또는 외부 핑)
 - [ ] **토스플레이스 개발자센터에서 실제 플러그인 등록·테스트 가맹점 연결·단말기 온보딩** (사업자 계정 필요, [토스프론트 플러그인 연동](#토스프론트-플러그인-연동) 섹션 절차대로)
-- [ ] `toss-plugin/` 폴더 ZIP 압축 후 개발 배포 → 실제 단말기에서 화면/결제 흐름 확인
+- [ ] `front-plugin/` ZIP(`npm run zip`) 개발 배포 → 실제 프론트 단말기에서 화면/결제 흐름 확인
+- [ ] `pos-plugin/` ZIP(`npm run zip`) 개발 배포 → 실제 POS에서 대기열 탭 확인
 - [ ] (선택) 결제 승인 웹훅 수신이 필요하면 developer-support@tossplace.com에 문의해서 웹훅 등록

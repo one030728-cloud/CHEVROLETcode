@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>정비 대기열 - Toss POS Plugin</title>
+<style>
+  * { box-sizing: border-box; }
+  :root {
+    --blue: #3182f6;
+    --blue-dark: #1b64da;
+    --blue-tint: #eef4ff;
+    --ink: #191f28;
+    --muted: #8b95a1;
+    --border: #e5e8eb;
+    --surface: #f2f4f6;
+    --error: #f04452;
+    --green: #12b76a;
+  }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Pretendard", "Malgun Gothic", sans-serif;
+    background: var(--surface);
+    color: var(--ink);
+  }
+  #app { max-width: 720px; margin: 0 auto; padding: 16px; }
+  .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .header h1 { font-size: 17px; margin: 0; }
+  .header .meta { font-size: 12px; color: var(--muted); }
+  .list { background: #fff; border-radius: 16px; overflow: hidden; }
+  .row { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--border); }
+  .row:last-child { border-bottom: none; }
+  .row .num { font-weight: 800; font-size: 15px; width: 32px; flex: 0 0 auto; }
+  .row .info { flex: 1; min-width: 0; }
+  .row .car { font-weight: 700; font-size: 14px; }
+  .row .sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .badge { display: inline-block; padding: 3px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; margin-left: 6px; }
+  .badge.waiting { background: var(--blue-tint); color: var(--blue); }
+  .badge.called { background: #e7f9f1; color: var(--green); }
+  .badge.notify_failed { background: #fdeeef; color: var(--error); }
+  .actions { display: flex; gap: 6px; flex: 0 0 auto; }
+  button {
+    padding: 10px 14px;
+    font-size: 13px;
+    font-weight: 700;
+    border-radius: 10px;
+    border: none;
+    cursor: pointer;
+    background: var(--blue-tint);
+    color: var(--blue);
+  }
+  button.complete { background: #e7f9f1; color: var(--green); }
+  button.confirm { background: var(--error); color: #fff; }
+  button:disabled { background: var(--border); color: #b0b8c1; cursor: not-allowed; }
+  .empty { padding: 48px 16px; text-align: center; color: var(--muted); font-size: 14px; }
+  .empty-title { font-size: 15px; font-weight: 700; color: var(--ink); margin-bottom: 4px; }
+</style>
+</head>
+<body>
+  <div id="app">
+    <div class="header">
+      <h1>정비 대기열</h1>
+      <span class="meta" id="store-name"></span>
+    </div>
+    <div class="list" id="list"></div>
+  </div>
+  <script src="./bundle.js"></script>
+</body>
+</html>
