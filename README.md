@@ -12,6 +12,7 @@
 
 - 🔗 저장소: https://github.com/one030728-cloud/CHEVROLETcode
 - 🌐 배포 주소: https://chevroletcode.onrender.com
+- ☁️ GCP API: https://chevrolet-api-amib56yomq-du.a.run.app
 
 ## 목차
 
@@ -316,11 +317,21 @@ SOLAPI_KAKAO_TEMPLATE_PROMO=         # 결제 3개월 후 홍보
 6. `main` 브랜치에 push하면 Render가 자동 재배포합니다 (Auto-Deploy 켜져 있는 경우)
 
 > ⚠️ Render 무료 플랜은 트래픽이 없으면 슬립 상태가 되어 오전 10시 프로모션 스케줄러가 안 돌 수 있습니다.
-> 이 문제를 없애려면 유료 플랜(항상 켜짐) 또는 외부 크론(예: cron-job.org가 `/healthz`를 주기적으로 호출)이 필요합니다.
+> 이 문제를 없애려면 유료 플랜(항상 켜짐) 또는 외부 크론(예: cron-job.org가 `/health`를 주기적으로 호출)이 필요합니다.
 
-## GCP 이전 및 트래픽 확장 계획
+## GCP 이전 및 트래픽 확장
 
-SQLite를 PostgreSQL로 바꾸고 Cloud Run에서 확장하기 위한 순서와 검증 체크리스트는
+GCP 이전을 위한 애플리케이션·데이터베이스·배포 기반 작업은 완료되어 있습니다.
+
+- Prisma datasource를 PostgreSQL로 전환하고 운영용 migration을 추가했습니다.
+- 저장소 루트의 `Dockerfile`로 Cloud Run에서 빌드·실행할 수 있습니다.
+- Cloud Scheduler가 호출할 `/internal/jobs/send-promotions` 작업 endpoint와 인증을 추가했습니다.
+- Front/POS API 주소를 환경별 설정으로 분리했습니다.
+- 현재 확인된 운영 리소스는 `chevrolet-postgres` Cloud SQL과
+  `chevrolet-api` Cloud Run(`asia-northeast3`)입니다.
+
+Secret Manager 이전, 운영 데이터 마이그레이션, Toss ACL 전환, 부하·복구 검증 등
+실제 운영 전환에 필요한 남은 작업은 [`TODO.md`](TODO.md)와
 [`docs/gcp-migration-and-scale-plan.md`](docs/gcp-migration-and-scale-plan.md)에 정리되어 있습니다.
 
 ## 알려진 제한사항 & 다음 단계
@@ -328,11 +339,10 @@ SQLite를 PostgreSQL로 바꾸고 Cloud Run에서 확장하기 위한 순서와 
 <details open>
 <summary><strong>현재 상태</strong></summary>
 
-- **DB 전환 완료 (SQLite, Prisma).** 예약/결제/매장 기록이 `backend/prisma/dev.db`(SQLite)에 저장되어 서버 재시작/재배포에도
-  유지됩니다 (`promoAt` 3개월 프로모션 예약도 유실되지 않음). 다만 지금은 로컬 파일 기반 SQLite이고, 운영 배포 시에는
-  `prisma/schema.prisma`의 `provider`를 `postgresql`로, `.env`의 `DATABASE_URL`을 Postgres(Supabase 등) 연결 문자열로
-  바꾸고 `npx prisma migrate dev`를 다시 실행해야 합니다 (자세한 내용은 `docs/02-design/features/multi-store-support.design.md`).
-  `src/store.js`는 여전히 함수 시그니처만 유지한 채 내부 구현(Prisma 쿼리)만 갈아끼우는 구조입니다.
+- **GCP용 DB 전환 기반 완료 (PostgreSQL, Prisma).** `backend/prisma/schema.prisma`의 provider를
+  PostgreSQL로 전환하고 `backend/prisma/migrations/20260805120000_init_postgresql/` 운영 migration을
+  추가했습니다. Cloud Run 컨테이너는 `DATABASE_URL`로 Cloud SQL에 연결합니다. 운영 데이터 export/import,
+  Secret Manager 연결, 재배포 후 데이터 유지와 부하 검증은 아직 남아 있습니다.
 - **멀티 가맹점 지원 (Phase 1~4 완료).** `merchantId` 기반 매장 식별 + DB 스코핑, 이메일/비밀번호 + JWT 기반
   2계층 관리자 인증(`hq_admin`/`store_admin`), 매장 대량 등록(`POST /api/admin/stores/bulk`), 알림톡
   발신 정책(브랜드 공용 + `#{매장명}` 변수 구분), 결제 웹훅 수신 엔드포인트(백업 경로, 실제 등록은 토스 담당자
@@ -367,10 +377,11 @@ SQLite를 PostgreSQL로 바꾸고 Cloud Run에서 확장하기 위한 순서와 
 **TODO**
 
 - [ ] 솔라피 알림톡 키/템플릿 4종 발급받아 Render Environment와 로컬 `.env`에 채우기
-- [ ] 운영 배포 전 `DATABASE_URL`을 Postgres(Supabase 등)로 전환 — Render 재배포 시 로컬 SQLite 파일은 초기화됨
-- [ ] Render Environment에 `JWT_SECRET`(고정 랜덤값)과 `ADMIN_BOOTSTRAP_EMAIL`/`ADMIN_BOOTSTRAP_PASSWORD` 등록
-- [ ] 웹훅 서명 검증 방식을 토스 담당자에게 문의해서 실제 스펙에 맞게 수정, `developer-support@tossplace.com`에 웹훅 등록 요청
-- [ ] Render 무료 플랜 슬립으로 인한 프로모션 스케줄러 미실행 문제 해결 (유료 플랜 또는 외부 핑)
+- [ ] Cloud SQL 운영 데이터 export/import 및 재배포 후 데이터 유지 확인
+- [ ] GCP Secret Manager에 `DATABASE_URL`, `JWT_SECRET`, 관리자 계정, Solapi 키 등록
+- [ ] Cloud Run 동시성·최대 인스턴스·DB 커넥션 풀 및 p95 응답시간 검증
+- [ ] Cloud Scheduler 재시도 시 프로모션 중복 발송 방지와 Cloud Logging/복구 검증
+- [ ] Toss Front/POS ACL과 운영 API 주소를 GCP URL로 전환
 - [ ] **토스플레이스 개발자센터에서 실제 플러그인 등록·테스트 가맹점 연결·단말기 온보딩** (사업자 계정 필요, [토스프론트 플러그인 연동](#토스프론트-플러그인-연동) 섹션 절차대로)
 - [ ] `front-plugin/` ZIP(`npm run zip`) 개발 배포 → 실제 프론트 단말기에서 화면/결제 흐름 확인
 - [ ] `pos-plugin/` ZIP(`npm run zip`) 개발 배포 → 실제 POS에서 대기열 탭 확인
