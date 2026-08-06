@@ -14,24 +14,24 @@
 ## P1 — GCP 이전 준비
 
 - [ ] GCP 프로젝트·리전·도메인 결정
-- [ ] Cloud SQL PostgreSQL 생성 및 백업 정책 설정
-- [ ] Prisma provider를 SQLite에서 PostgreSQL로 전환
-- [ ] 운영 PostgreSQL migration 생성·검증
+- [x] Cloud SQL PostgreSQL 생성 및 백업 정책 설정
+- [x] Prisma provider를 SQLite에서 PostgreSQL로 전환
+- [x] 운영 PostgreSQL migration 생성·검증
 - [ ] Render SQLite 데이터 export/import
-- [ ] Cloud Run 저장소 루트 배포 설정 작성
-- [ ] Cloud Run Build/Start 명령과 `PORT` 동작 확인
+- [x] Cloud Run 저장소 루트 배포 설정 작성
+- [x] Cloud Run Build/Start 명령과 `PORT` 동작 확인
 - [ ] Secret Manager로 운영 비밀값 이전
-- [ ] Front/POS API base URL을 환경별 설정으로 분리
+- [x] Front/POS API base URL을 환경별 설정으로 분리
 - [ ] GCP API 도메인을 Toss Front/POS ACL에 등록
 
 ## P1 — 트래픽·중복 처리 보완
 
-- [ ] 예약 생성의 idempotency key와 중복 예약 방지 추가
-- [ ] `waiting → called` 조건부 update로 중복 호출 방지
-- [ ] `called → completed` 조건부 update 추가
+- [x] 예약 생성의 idempotency key와 중복 예약 방지 추가
+- [x] `waiting → called` 조건부 update로 중복 호출 방지
+- [x] `called → completed` 조건부 update 추가
 - [ ] 웹훅 중복 처리와 재시도 정책 점검
-- [ ] `node-cron`을 Cloud Scheduler 또는 Cloud Run Job으로 분리
-- [ ] 프로모션 작업의 중복 실행 방지 추가
+- [x] `node-cron`을 Cloud Scheduler 또는 Cloud Run Job으로 분리
+- [x] 프로모션 작업의 중복 실행 방지 추가
 - [ ] 인스턴스 간 공유 rate limit 검토(Redis/Cloud Armor/API Gateway)
 - [ ] 알림톡 발송 지연·실패 시 재처리 정책 확정
 - [ ] Cloud Run 동시성·최대 인스턴스·DB 커넥션 풀 결정
@@ -55,4 +55,3 @@
 - [ ] 예약·호출·웹훅·프로모션 중복 처리가 검증됨
 - [ ] 부하 테스트 결과와 Cloud Run/DB 설정값이 기록됨
 - [ ] GCP 장애 시 Render 또는 이전 ZIP으로 롤백 가능함
-

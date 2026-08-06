@@ -1,11 +1,12 @@
 import { posPluginSdk } from '@tossplace/pos-plugin-sdk'
 
 // 실제 토스POS 단말기 밖(로컬 브라우저)에서 미리 볼 때는 posPluginSdk가 부모 프레임(POS 앱)과
-// 통신하지 못해 응답이 오지 않는다. localhost/onrender.com 미리보기에서는 테스트 매장(merchantId '0')을
-// 그대로 흉내 낸 값을 써서, 실제 단말기 없이도 화면/API 연동을 확인할 수 있게 한다.
-const isPreview = /^(localhost|127\.0\.0\.1|chevroletcode\.onrender\.com)$/.test(location.hostname)
+// 통신하지 못해 응답이 오지 않는다. 백엔드가 제공하는 미리보기에서는 같은 origin을 사용하고,
+// 실제 배포 번들은 빌드 시 CHEVROLET_API_BASE_URL을 주입한다.
+const configuredApiBaseUrl = __CHEVROLET_API_BASE_URL__
+const isPreview = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) || location.pathname.startsWith('/pos-plugin/')
 
-const API_BASE = isPreview ? '' : 'https://chevroletcode.onrender.com'
+const API_BASE = isPreview ? '' : String(configuredApiBaseUrl).replace(/\/$/, '')
 
 const STATUS_LABEL = { waiting: '대기중', called: '호출완료', notify_failed: '알림실패' }
 
@@ -105,7 +106,10 @@ async function runAction(id, action) {
   if (!ok) {
     notify('error', body.error || '처리 중 오류가 발생했습니다.')
   } else {
-    notify('success', action === 'call' ? '순서 호출 알림톡을 보냈습니다.' : '정비완료로 처리했습니다.')
+    const message = body.alreadyProcessed
+      ? (action === 'call' ? '이미 호출 처리된 예약입니다.' : '이미 정비완료 처리된 예약입니다.')
+      : (action === 'call' ? '순서 호출 알림톡을 보냈습니다.' : '정비완료로 처리했습니다.')
+    notify('success', message)
   }
   await loadQueue()
 }

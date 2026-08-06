@@ -8,6 +8,7 @@ const path = require('node:path')
 
 const watch = process.argv.includes('--watch')
 const distDir = path.join(__dirname, 'dist')
+const apiBaseUrl = String(process.env.CHEVROLET_API_BASE_URL || '').trim().replace(/\/$/, '')
 
 fs.rmSync(distDir, { recursive: true, force: true })
 fs.mkdirSync(distDir, { recursive: true })
@@ -22,6 +23,9 @@ const options = {
   target: 'es2018',
   minify: !watch,
   sourcemap: watch,
+  define: {
+    __CHEVROLET_API_BASE_URL__: JSON.stringify(apiBaseUrl),
+  },
 }
 
 if (watch) {

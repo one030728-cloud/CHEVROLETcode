@@ -4,7 +4,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -43,6 +43,7 @@ model Reservation {
   phone       String
   serviceType String
   queueNumber Int
+  idempotencyKey String? @unique
   status      String    @default("waiting")
   createdAt   DateTime  @default(now())
   calledAt    DateTime?
@@ -64,6 +65,7 @@ model Payment {
   promoAt     DateTime
   promoSent   Boolean   @default(false)
   promoSentAt DateTime?
+  promoClaimedAt DateTime?
   createdAt   DateTime  @default(now())
 
   @@index([storeId])

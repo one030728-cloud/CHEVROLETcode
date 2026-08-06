@@ -20,7 +20,8 @@
 ```bash
 cd pos-plugin
 npm install
-npm run build          # dist/ 생성 (index.html, iframe-manifest.json, bundle.js)
+# bash: CHEVROLET_API_BASE_URL=https://<cloud-run-url> npm run build
+# PowerShell: $env:CHEVROLET_API_BASE_URL='https://<cloud-run-url>'; npm run build
 ```
 
 `backend`를 실행 중이면(`backend`의 `npm start`) `http://localhost:3000/pos-plugin/index.html`에서
@@ -56,7 +57,8 @@ chevrolet-pos-plugin.zip
 ```bash
 cd pos-plugin
 npm install
-npm run zip       # build 후 chevrolet-pos-plugin.zip 생성
+# bash: CHEVROLET_API_BASE_URL=https://<cloud-run-url> npm run zip
+# PowerShell: $env:CHEVROLET_API_BASE_URL='https://<cloud-run-url>'; npm run zip
 ```
 
 `npm run zip`은 먼저 `dist/`를 만들고, `dist/`의 실행 파일만 ZIP으로 묶습니다. 소스 코드,
@@ -65,7 +67,7 @@ npm run zip       # build 후 chevrolet-pos-plugin.zip 생성
 ## 실제 POS 단말기에 배포하려면 (사업자 계정 필요)
 
 1. [토스플레이스 개발자센터](https://developers.tossplace.com/login)에서 **내 플러그인 → 플러그인 등록**을
-   열고 타입을 `토스 POS`로 선택합니다. ACL에는 `https://chevroletcode.onrender.com`을 등록합니다.
+   열고 타입을 `토스 POS`로 선택합니다. ACL에는 배포한 Cloud Run API URL을 등록합니다.
 2. 테스트 가맹점을 생성/연결하고, 해당 가맹점에서 이 플러그인 사용 여부를 켭니다.
 3. 테스트 POS를 테스트 단말기로 등록합니다.
 4. `npm run zip`으로 만든 `chevrolet-pos-plugin.zip`을

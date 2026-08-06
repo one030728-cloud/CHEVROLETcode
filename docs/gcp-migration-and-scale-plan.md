@@ -85,6 +85,7 @@ SOLAPI_KAKAO_TEMPLATE_RECEIPT
 SOLAPI_KAKAO_TEMPLATE_PROMO
 TOSS_WEBHOOK_SECRET
 TRUST_PROXY_HOPS
+PROMOTION_JOB_TOKEN
 ```
 
 ### 2단계: SQLite → PostgreSQL 전환
@@ -231,3 +232,15 @@ GCP 이전 전에 API base URL을 한 곳의 환경별 설정으로 분리한다
 - 문제가 생기면 플러그인 ZIP을 이전 버전으로 되돌리고 API 도메인을 Render로 복귀한다.
 - 양쪽 DB에 동시에 쓰는 이중 쓰기는 데이터 불일치 위험이 있으므로 별도 설계 없이 사용하지 않는다.
 
+## 2026-08-05 실행 기록
+
+- GCP 프로젝트: `tossplugincar-dev`, 리전: `asia-northeast3`
+- Cloud SQL: `chevrolet-postgres` / 데이터베이스 `chevrolet` / 앱 사용자 `chevrolet_app`
+- Cloud Run 서비스: `https://chevrolet-api-amib56yomq-du.a.run.app`
+- 초기 Cloud Run 설정: 최소 1, 최대 5 인스턴스, 동시성 20, 1 vCPU, 512MiB
+- Cloud Scheduler: `chevrolet-promotion-daily`, 매일 10:00 `Asia/Seoul`
+- Auth Proxy를 통한 `prisma migrate deploy`와 `prisma migrate status` 검증 완료
+- 현재 Solapi 운영값은 아직 Secret Manager에 등록하지 않았으므로 알림톡 기능과 실제 Toss ACL 전환은 보류한다.
+- 후속 배포에서 노출된 `PROMOTION_JOB_TOKEN`을 교체하고 Scheduler 헤더를 갱신했다. 새 리비전 `chevrolet-api-00003-dmm` 배포 후 수동 실행에서 프로모션 엔드포인트 `POST 200`을 확인했다.
+- Cloud Run 공개 URL에서 Google 엣지 경로와 충돌하던 `/healthz` 대신 `/health`를 사용하도록 변경했으며, Express 응답 `200 ok`를 확인했다.
+- 프로모션 claim 로직으로 대체된 `listDuePromotions`를 제거했다.

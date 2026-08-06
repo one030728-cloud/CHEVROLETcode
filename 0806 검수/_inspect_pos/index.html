@@ -1,0 +1,444 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="theme-color" content="#f7f8fa" />
+<title>정비 대기열 - Toss POS Plugin</title>
+<style>
+  * { box-sizing: border-box; }
+
+  :root {
+    --blue: #3182f6;
+    --blue-strong: #1b64da;
+    --blue-soft: #eaf3ff;
+    --ink: #191f28;
+    --sub: #6b7684;
+    --muted: #98a2b0;
+    --line: #eef0f2;
+    --surface: #ffffff;
+    --canvas: #f7f8fa;
+    --green: #00b876;
+    --green-soft: #e8f8f1;
+    --red: #f04452;
+    --red-soft: #fff0f1;
+    --shadow: 0 2px 8px rgba(25, 31, 40, 0.04);
+  }
+
+  html, body { min-height: 100%; }
+
+  body {
+    margin: 0;
+    color: var(--ink);
+    background: var(--canvas);
+    font-family: -apple-system, BlinkMacSystemFont, "Pretendard", "Malgun Gothic", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  button {
+    font: inherit;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  #app {
+    width: min(100%, 760px);
+    min-height: 100vh;
+    margin: 0 auto;
+    padding: 20px 18px 28px;
+  }
+
+  .topbar {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 18px;
+  }
+
+  .eyebrow {
+    display: block;
+    margin-bottom: 5px;
+    color: var(--blue);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+
+  h1, h2, p { margin: 0; }
+
+  h1 {
+    font-size: 23px;
+    line-height: 1.25;
+    letter-spacing: -0.04em;
+  }
+
+  .store-status {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    max-width: 45%;
+    padding-top: 7px;
+    color: var(--sub);
+    font-size: 12px;
+    font-weight: 600;
+    text-align: right;
+  }
+
+  .connection-dot {
+    width: 7px;
+    height: 7px;
+    flex: 0 0 auto;
+    border-radius: 50%;
+    background: var(--green);
+    box-shadow: 0 0 0 3px var(--green-soft);
+  }
+
+  .connection-dot.checking {
+    background: #ffb020;
+    box-shadow: 0 0 0 3px #fff5dc;
+  }
+
+  .connection-dot.error {
+    background: var(--red);
+    box-shadow: 0 0 0 3px var(--red-soft);
+  }
+
+  .summary {
+    display: grid;
+    grid-template-columns: 1.15fr 1fr;
+    gap: 10px;
+    margin-bottom: 28px;
+  }
+
+  .summary-card {
+    min-height: 118px;
+    padding: 18px;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    background: var(--surface);
+    box-shadow: var(--shadow);
+  }
+
+  .summary-card.primary {
+    border-color: transparent;
+    background: var(--blue);
+    color: #fff;
+    box-shadow: 0 7px 16px rgba(49, 130, 246, 0.18);
+  }
+
+  .summary-label {
+    display: block;
+    margin-bottom: 10px;
+    color: var(--sub);
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+  }
+
+  .primary .summary-label { color: rgba(255, 255, 255, 0.82); }
+
+  .summary-value {
+    display: inline-block;
+    font-size: 36px;
+    line-height: 1;
+    letter-spacing: -0.06em;
+  }
+
+  .summary-unit {
+    margin-left: 4px;
+    font-size: 14px;
+    font-weight: 700;
+  }
+
+  .summary-note {
+    display: block;
+    margin-top: 12px;
+    color: var(--muted);
+    font-size: 12px;
+    letter-spacing: -0.03em;
+  }
+
+  .primary .summary-note { color: rgba(255, 255, 255, 0.78); }
+
+  .section-heading {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+  }
+
+  .section-heading h2 {
+    font-size: 17px;
+    letter-spacing: -0.04em;
+  }
+
+  .section-heading p {
+    margin-top: 4px;
+    color: var(--muted);
+    font-size: 12px;
+    letter-spacing: -0.03em;
+  }
+
+  .refresh-button {
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--surface);
+    color: var(--sub);
+    font-size: 19px;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .refresh-button:active { transform: scale(0.96); }
+  .refresh-button:disabled { color: var(--muted); cursor: wait; }
+
+  .list {
+    display: grid;
+    gap: 10px;
+  }
+
+  .queue-item {
+    display: grid;
+    grid-template-columns: 58px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 14px;
+    padding: 16px;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    background: var(--surface);
+    box-shadow: var(--shadow);
+  }
+
+  .queue-item.status-called { border-color: #d8f0e6; }
+  .queue-item.status-notify_failed { border-color: #ffdfe2; }
+
+  .queue-number {
+    display: grid;
+    place-items: center;
+    width: 52px;
+    height: 52px;
+    border-radius: 16px;
+    background: var(--blue-soft);
+    color: var(--blue-strong);
+    font-size: 17px;
+    font-weight: 800;
+    letter-spacing: -0.05em;
+  }
+
+  .status-called .queue-number {
+    background: var(--green-soft);
+    color: var(--green);
+  }
+
+  .status-notify_failed .queue-number {
+    background: var(--red-soft);
+    color: var(--red);
+  }
+
+  .queue-main { min-width: 0; }
+
+  .queue-top {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 7px;
+  }
+
+  .car-number {
+    overflow: hidden;
+    font-size: 16px;
+    font-weight: 750;
+    letter-spacing: -0.04em;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .service {
+    overflow: hidden;
+    margin-top: 5px;
+    color: var(--sub);
+    font-size: 13px;
+    letter-spacing: -0.03em;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    min-height: 23px;
+    padding: 0 8px;
+    border-radius: 7px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+  }
+
+  .badge.waiting { background: var(--blue-soft); color: var(--blue-strong); }
+  .badge.called { background: var(--green-soft); color: #008b5a; }
+  .badge.notify_failed { background: var(--red-soft); color: var(--red); }
+
+  .actions {
+    display: flex;
+    gap: 7px;
+    flex: 0 0 auto;
+  }
+
+  .action-button {
+    min-width: 74px;
+    min-height: 48px;
+    padding: 0 13px;
+    border: 0;
+    border-radius: 13px;
+    background: var(--blue-soft);
+    color: var(--blue-strong);
+    font-size: 13px;
+    font-weight: 750;
+    letter-spacing: -0.03em;
+    cursor: pointer;
+    transition: transform 120ms ease, background 120ms ease;
+  }
+
+  .action-button:active { transform: scale(0.97); }
+  .action-button.complete { background: var(--green-soft); color: #008b5a; }
+  .action-button.confirm { background: var(--red); color: #fff; }
+  .action-button:disabled { background: #f1f2f4; color: #b4bcc7; cursor: not-allowed; }
+  .action-button:disabled:active { transform: none; }
+
+  .empty, .error-card {
+    padding: 42px 20px;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    background: var(--surface);
+    text-align: center;
+    box-shadow: var(--shadow);
+  }
+
+  .empty-mark, .error-mark {
+    display: grid;
+    place-items: center;
+    width: 46px;
+    height: 46px;
+    margin: 0 auto 13px;
+    border-radius: 15px;
+    background: var(--blue-soft);
+    color: var(--blue);
+    font-size: 21px;
+    font-weight: 800;
+  }
+
+  .error-mark { background: var(--red-soft); color: var(--red); }
+
+  .empty-title, .error-title {
+    color: var(--ink);
+    font-size: 15px;
+    font-weight: 750;
+    letter-spacing: -0.04em;
+  }
+
+  .empty-copy, .error-copy {
+    margin-top: 6px;
+    color: var(--sub);
+    font-size: 13px;
+    line-height: 1.5;
+    letter-spacing: -0.03em;
+  }
+
+  .hint {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin-top: 14px;
+    padding: 12px 14px;
+    border-radius: 13px;
+    background: #f0f5ff;
+    color: #55708f;
+    font-size: 12px;
+    line-height: 1.45;
+    letter-spacing: -0.03em;
+  }
+
+  .hint-mark {
+    display: grid;
+    place-items: center;
+    width: 17px;
+    height: 17px;
+    flex: 0 0 auto;
+    border: 1px solid #8fb7f2;
+    border-radius: 50%;
+    color: var(--blue);
+    font-size: 11px;
+    font-weight: 800;
+  }
+
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  @media (max-width: 560px) {
+    #app { padding: 16px 12px 22px; }
+    h1 { font-size: 21px; }
+    .queue-item { grid-template-columns: 52px minmax(0, 1fr); gap: 12px; }
+    .queue-number { width: 48px; height: 48px; }
+    .actions { grid-column: 1 / -1; }
+    .action-button { flex: 1; }
+  }
+</style>
+</head>
+<body>
+  <main id="app">
+    <header class="topbar">
+      <div>
+        <span class="eyebrow">매장 대기관리</span>
+        <h1>정비 대기열</h1>
+      </div>
+      <div class="store-status">
+        <span class="connection-dot checking" id="connection-dot" aria-hidden="true"></span>
+        <span id="store-name">매장 확인 중</span>
+      </div>
+    </header>
+
+    <section class="summary" aria-label="대기열 요약">
+      <div class="summary-card primary">
+        <span class="summary-label">현재 대기</span>
+        <strong class="summary-value" id="waiting-count">0</strong><span class="summary-unit">명</span>
+        <span class="summary-note">아직 호출되지 않은 고객</span>
+      </div>
+      <div class="summary-card">
+        <span class="summary-label">다음 호출</span>
+        <strong class="summary-value" id="next-number">—</strong>
+        <span class="summary-note">가장 먼저 호출할 번호</span>
+      </div>
+    </section>
+
+    <section aria-labelledby="queue-heading">
+      <div class="section-heading">
+        <div>
+          <h2 id="queue-heading">대기 고객</h2>
+          <p id="last-updated">5초마다 자동 업데이트</p>
+        </div>
+        <button class="refresh-button" id="refresh-button" type="button" aria-label="대기열 새로고침">↻</button>
+      </div>
+      <div class="list" id="list"></div>
+    </section>
+
+    <div class="hint">
+      <span class="hint-mark" aria-hidden="true">i</span>
+      <p>호출 또는 완료는 버튼을 한 번 누른 뒤 3초 안에 같은 버튼을 한 번 더 눌러 확정합니다.</p>
+    </div>
+    <p class="sr-only" id="page-status" role="status" aria-live="polite"></p>
+  </main>
+  <script src="./bundle.js"></script>
+</body>
+</html>

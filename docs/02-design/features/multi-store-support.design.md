@@ -186,7 +186,7 @@ N/A — 이번 단계는 데이터 계층 교체만 다루며 UI 변경 없음.
 
 | Code | Message | Cause | Handling |
 |------|---------|-------|----------|
-| 500 | DB 연결 실패 | `DATABASE_URL` 오설정 또는 DB 다운 | 기존과 동일하게 `catch`에서 500 응답 + 로그. 헬스체크(`/healthz`)에 DB ping 추가는 Phase 5로 미룸 |
+| 500 | DB 연결 실패 | `DATABASE_URL` 오설정 또는 DB 다운 | 기존과 동일하게 `catch`에서 500 응답 + 로그. 헬스체크(`/health`)에 DB ping 추가는 Phase 5로 미룸 |
 
 ### 6.2 Error Response Format
 

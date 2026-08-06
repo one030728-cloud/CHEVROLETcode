@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="stylesheet" href="https://static.toss.im/tds/43.9.4/css/tds.min.css" />
+    <link rel="stylesheet" type="text/css" href="https://static.toss.im/tps/main.css" />
+    <link rel="stylesheet" type="text/css" href="https://static.toss.im/tps/others.css" />
+    <script src="https://cdn.tossplace.com/toss-front-sdk/v0/index.js"></script>
+    <script src="./sdk.js"></script>
+    <title>온보딩 - Toss Front Plugin</title>
+  </head>
+  <body>
+    <!--
+      단일 매장(쉐보레 대리점) 전용 플러그인이라 플러그인 자체 로그인(직원 인증)이
+      필요하지 않다. 매장 단말기 자체 온보딩(사업자번호/매장고유번호/휴대폰)은
+      토스프론트 OS 레벨에서 처리되며 이 화면과는 별개다.
+      그래서 여기서는 바로 index.html로 넘어간다.
+      나중에 매장이 여러 곳으로 늘어나 플러그인 자체 로그인이 필요해지면
+      템플릿의 sdk.storage 기반 토큰 저장 패턴을 참고해서 구현하면 된다.
+      (https://github.com/tossplace/toss-front-plugin-template 의 onboarding.html)
+    -->
+    <div id="app"></div>
+    <script>
+      location.href = './index.html'
+    </script>
+  </body>
+</html>

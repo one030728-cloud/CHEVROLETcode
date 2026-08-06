@@ -26,6 +26,10 @@ async function ensureDefaultHqAdmin() {
   const existing = await prisma.adminUser.findFirst({ where: { role: 'hq_admin' } })
   if (existing) return
 
+  if (process.env.NODE_ENV === 'production' && (!process.env.ADMIN_BOOTSTRAP_EMAIL || !process.env.ADMIN_BOOTSTRAP_PASSWORD)) {
+    throw new Error('운영 환경에서 첫 본사 관리자 계정을 만들려면 ADMIN_BOOTSTRAP_EMAIL/PASSWORD가 필요합니다.')
+  }
+
   const email = process.env.ADMIN_BOOTSTRAP_EMAIL || 'admin@local'
   const password = process.env.ADMIN_BOOTSTRAP_PASSWORD || require('node:crypto').randomBytes(9).toString('base64url')
   const passwordHash = await hashPassword(password)
@@ -71,6 +75,9 @@ async function markAdminLogin(id) {
 // 로컬 브라우저 미리보기(merchantId=0)가 바로 동작한다. upsert라 여러 번 불려도 안전하다.
 // Plan SC: FR-06 — 서버 재시작 후에도 매장이 남아있는지 확인하는 시드 데이터(§8.5).
 async function ensureDefaultStore() {
+  // 테스트 merchantId=0은 로컬 미리보기 전용이다. Cloud Run 운영 컨테이너에서
+  // 자동 시드되면 실제 매장 등록 정책을 우회하므로 production에서는 만들지 않는다.
+  if (process.env.NODE_ENV === 'production' && process.env.ALLOW_TEST_STORE !== 'true') return
   await prisma.store.upsert({
     where: { merchantId: '0' },
     update: {},
@@ -124,29 +131,75 @@ function findStoreByMerchantId(merchantId) {
 // 끼어들면 두 손님이 동시에 "앞에 아무도 없음(peopleAhead=0)"으로 계산되어 둘 다 순서 호출 알림톡을
 // 받는 경쟁 상태가 있었다. SQLite/Prisma 트랜잭션 안에서 카운트→채번→생성을 순서대로 묶으면
 // 같은 트랜잭션이 끝나기 전까지 다른 트랜잭션이 끼어들 수 없어 안전해진다.
-async function createReservation({ storeId, carNumber, phone, serviceType }) {
+async function createReservation({ storeId, carNumber, phone, serviceType, idempotencyKey }) {
   const today = kstDateString()
-  return prisma.$transaction(async (tx) => {
-    const peopleAhead = await tx.reservation.count({
-      where: { storeId, status: { not: 'completed' } },
-    })
+  try {
+    return await prisma.$transaction(async (tx) => {
+      if (idempotencyKey) {
+        const existing = await tx.reservation.findUnique({ where: { idempotencyKey } })
+        if (existing) {
+          if (existing.storeId !== storeId) {
+            const conflict = new Error('Idempotency-Key가 다른 매장에서 이미 사용되었습니다.')
+            conflict.code = 'IDEMPOTENCY_KEY_CONFLICT'
+            throw conflict
+          }
+          const peopleAhead = await tx.reservation.count({
+            where: {
+              storeId,
+              status: { not: 'completed' },
+              createdAt: { lt: existing.createdAt },
+            },
+          })
+          return { reservation: existing, peopleAhead, duplicate: true }
+        }
+      }
 
-    const existingCounter = await tx.queueCounter.findUnique({
-      where: { storeId_date: { storeId, date: today } },
-    })
-    const queueNumber = existingCounter
-      ? (await tx.queueCounter.update({
-          where: { id: existingCounter.id },
-          data: { counter: { increment: 1 } },
-        })).counter
-      : (await tx.queueCounter.create({ data: { storeId, date: today, counter: 1 } })).counter
+      const peopleAhead = await tx.reservation.count({
+        where: { storeId, status: { not: 'completed' } },
+      })
 
-    const reservation = await tx.reservation.create({
-      data: { storeId, carNumber, phone, serviceType, queueNumber, status: 'waiting' },
-    })
+      const existingCounter = await tx.queueCounter.findUnique({
+        where: { storeId_date: { storeId, date: today } },
+      })
+      const queueNumber = existingCounter
+        ? (await tx.queueCounter.update({
+            where: { id: existingCounter.id },
+            data: { counter: { increment: 1 } },
+          })).counter
+        : (await tx.queueCounter.create({ data: { storeId, date: today, counter: 1 } })).counter
 
-    return { reservation, peopleAhead }
-  })
+      const reservation = await tx.reservation.create({
+        data: {
+          storeId,
+          carNumber,
+          phone,
+          serviceType,
+          queueNumber,
+          idempotencyKey: idempotencyKey || null,
+          status: 'waiting',
+        },
+      })
+
+      return { reservation, peopleAhead, duplicate: false }
+    })
+  } catch (error) {
+    // 두 요청이 같은 idempotency key로 동시에 들어오면 둘 다 사전 조회를 통과할 수 있다.
+    // unique 제약에서 진 요청은 이미 생성된 예약을 반환해 재시도도 안전하게 만든다.
+    if (error?.code === 'P2002' && idempotencyKey) {
+      const existing = await prisma.reservation.findUnique({ where: { idempotencyKey } })
+      if (existing?.storeId === storeId) {
+        const peopleAhead = await prisma.reservation.count({
+          where: {
+            storeId,
+            status: { not: 'completed' },
+            createdAt: { lt: existing.createdAt },
+          },
+        })
+        return { reservation: existing, peopleAhead, duplicate: true }
+      }
+    }
+    throw error
+  }
 }
 
 // storeId를 안 넘기면(관리자 "전체 매장 보기") 전체를 반환한다.
@@ -181,10 +234,12 @@ async function deleteReservation(id) {
 
 async function markReservationCalled(id) {
   try {
-    return await prisma.reservation.update({
-      where: { id },
+    const result = await prisma.reservation.updateMany({
+      where: { id, status: 'waiting' },
       data: { status: 'called', calledAt: new Date() },
     })
+    if (!result.count) return null
+    return prisma.reservation.findUnique({ where: { id }, include: { store: true } })
   } catch {
     return null
   }
@@ -194,10 +249,12 @@ async function markReservationCalled(id) {
 // 별개로, 이걸 눌러야 다음 예약의 앞사람 계산에서 빠져 대기인원이 줄어든다.
 async function markReservationCompleted(id) {
   try {
-    return await prisma.reservation.update({
-      where: { id },
+    const result = await prisma.reservation.updateMany({
+      where: { id, status: { in: ['called', 'notify_failed'] } },
       data: { status: 'completed', completedAt: new Date() },
     })
+    if (!result.count) return null
+    return prisma.reservation.findUnique({ where: { id }, include: { store: true } })
   } catch {
     return null
   }
@@ -205,7 +262,11 @@ async function markReservationCompleted(id) {
 
 async function markReservationNotifyFailed(id) {
   try {
-    return await prisma.reservation.update({ where: { id }, data: { status: 'notify_failed' } })
+    const result = await prisma.reservation.updateMany({
+      where: { id, status: 'called' },
+      data: { status: 'notify_failed' },
+    })
+    return result.count ? prisma.reservation.findUnique({ where: { id }, include: { store: true } }) : null
   } catch {
     return null
   }
@@ -267,21 +328,66 @@ function listPayments(storeId) {
   })
 }
 
-function listDuePromotions() {
-  return prisma.payment.findMany({
-    where: { promoSent: false, promoAt: { lte: new Date() } },
+// Cloud Scheduler는 최소 한 번 전달하고, 동일한 작업이 동시에 들어올 수 있다.
+// 외부 알림 API를 호출하기 전에 짧은 claim을 원자적으로 잡아 같은 결제건을 다른
+// 인스턴스가 동시에 처리하지 않게 한다. 프로세스가 죽어 claim만 남은 건은 10분 후
+// 다시 claim할 수 있다(외부 API 호출 직후 프로세스가 죽는 경우의 완전한 exactly-once는
+// 알림 제공자 idempotency 키가 없으면 보장할 수 없으므로, 성공 후 promoSent를 최종 기준으로 둔다).
+async function claimDuePromotions(limit = 100) {
+  const now = new Date()
+  const staleBefore = new Date(now.getTime() - 10 * 60 * 1000)
+  const candidates = await prisma.payment.findMany({
+    where: {
+      promoSent: false,
+      promoAt: { lte: now },
+      OR: [{ promoClaimedAt: null }, { promoClaimedAt: { lt: staleBefore } }],
+    },
+    orderBy: { promoAt: 'asc' },
+    take: limit,
     include: { store: true },
   })
+
+  const claimed = []
+  for (const candidate of candidates) {
+    const result = await prisma.payment.updateMany({
+      where: {
+        id: candidate.id,
+        promoSent: false,
+        OR: candidate.promoClaimedAt
+          ? [{ promoClaimedAt: candidate.promoClaimedAt }]
+          : [{ promoClaimedAt: null }],
+      },
+      data: { promoClaimedAt: now },
+    })
+    if (result.count) {
+      const payment = await prisma.payment.findUnique({ where: { id: candidate.id }, include: { store: true } })
+      if (payment) claimed.push(payment)
+    }
+  }
+  return claimed
 }
 
 async function markPromoSent(id) {
   try {
-    return await prisma.payment.update({
-      where: { id },
-      data: { promoSent: true, promoSentAt: new Date() },
+    const result = await prisma.payment.updateMany({
+      where: { id, promoSent: false, promoClaimedAt: { not: null } },
+      data: { promoSent: true, promoSentAt: new Date(), promoClaimedAt: null },
     })
+    if (!result.count) return null
+    return prisma.payment.findUnique({ where: { id } })
   } catch {
     return null
+  }
+}
+
+async function releasePromoClaim(id) {
+  try {
+    await prisma.payment.updateMany({
+      where: { id, promoSent: false },
+      data: { promoClaimedAt: null },
+    })
+  } catch {
+    // 다음 Scheduler 실행에서 stale claim으로 회수할 수 있으므로 release 실패는 삼킨다.
   }
 }
 
@@ -321,6 +427,7 @@ module.exports = {
   findPaymentByKey,
   markPaymentStatus,
   listPayments,
-  listDuePromotions,
+  claimDuePromotions,
   markPromoSent,
+  releasePromoClaim,
 }

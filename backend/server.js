@@ -2,7 +2,6 @@ require('dotenv').config()
 const express = require('express')
 const cors = require('cors')
 const rateLimit = require('express-rate-limit')
-const cron = require('node-cron')
 const path = require('node:path')
 const {
   ensureDefaultStore,
@@ -29,8 +28,9 @@ const {
   findPaymentByKey,
   markPaymentStatus,
   listPayments,
-  listDuePromotions,
+  claimDuePromotions,
   markPromoSent,
+  releasePromoClaim,
 } = require('./src/store')
 const {
   sendReservationAlimtalk,
@@ -43,6 +43,9 @@ const { hashPassword, verifyPassword, signAdminToken, verifyAdminToken } = requi
 // JWT_SECRET이 없으면(로컬 개발) 매 부팅마다 랜덤 값을 생성한다 — 서버를 재시작하면
 // 이전 로그인 토큰은 전부 무효화되지만(재로그인 필요), 로컬 개발엔 문제없다.
 // 운영 배포에서는 반드시 .env에 고정된 JWT_SECRET을 넣어야 한다.
+if (!process.env.JWT_SECRET && process.env.NODE_ENV === 'production') {
+  throw new Error('운영 환경에서는 JWT_SECRET을 반드시 설정해야 합니다.')
+}
 if (!process.env.JWT_SECRET) {
   process.env.JWT_SECRET = require('node:crypto').randomBytes(32).toString('hex')
   console.warn('[auth] JWT_SECRET이 설정되지 않아 임시 값으로 발급합니다. 운영 배포 전 .env에 고정값을 지정하세요.')
@@ -218,7 +221,15 @@ const paymentLimiter = rateLimit({
 // status도 함께 갱신해준다 — 인메모리 시절엔 같은 객체를 참조해서 자동으로 반영됐지만
 // Prisma는 매번 새 객체를 반환하므로 명시적으로 맞춰줘야 한다.
 async function notifyQueueTurn(reservation) {
-  await markReservationCalled(reservation.id)
+  const called = await markReservationCalled(reservation.id)
+  if (!called) {
+    const current = await getReservation(reservation.id)
+    if (current && ['called', 'notify_failed', 'completed'].includes(current.status)) {
+      reservation.status = current.status
+      return { changed: false, status: current.status }
+    }
+    throw new Error('대기중인 예약이 아니거나 이미 삭제되었습니다.')
+  }
   reservation.status = 'called'
   try {
     await sendQueueTurnAlimtalk({
@@ -230,9 +241,10 @@ async function notifyQueueTurn(reservation) {
     })
   } catch (notifyError) {
     console.error(`순서 알림톡 발송 실패 [예약 id=${reservation.id}]:`, notifyError.message)
-    await markReservationNotifyFailed(reservation.id)
-    reservation.status = 'notify_failed'
+    const failed = await markReservationNotifyFailed(reservation.id)
+    reservation.status = failed?.status || (await getReservation(reservation.id))?.status || 'notify_failed'
   }
+  return { changed: true, status: reservation.status }
 }
 
 // --- 예약(대기순번) ---
@@ -261,7 +273,30 @@ app.post('/api/reservations', reservationLimiter, requireStore, async (req, res)
     }
     const serviceType = SERVICE_TYPES[serviceTypeKey]
 
-    const { reservation, peopleAhead } = await createReservation({ storeId, carNumber, phone, serviceType })
+    const idempotencyKey = String(req.get('idempotency-key') || '').trim() || null
+    if (idempotencyKey && idempotencyKey.length > 200) {
+      return res.status(400).json({ ok: false, error: 'Idempotency-Key가 너무 깁니다.' })
+    }
+    const { reservation, peopleAhead, duplicate } = await createReservation({
+      storeId,
+      carNumber,
+      phone,
+      serviceType,
+      idempotencyKey,
+    })
+
+    if (duplicate) {
+      return res.json({
+        ok: true,
+        id: reservation.id,
+        queueNumber: reservation.queueNumber,
+        peopleAhead,
+        serviceType: reservation.serviceType,
+        status: reservation.status,
+        duplicate: true,
+      })
+    }
+
     reservation.store = req.store // notifyQueueTurn/알림톡에서 #{매장명}으로 쓰기 위해 붙여둔다
 
     try {
@@ -288,6 +323,9 @@ app.post('/api/reservations', reservationLimiter, requireStore, async (req, res)
     })
   } catch (e) {
     console.error('reservation error:', e)
+    if (e?.code === 'IDEMPOTENCY_KEY_CONFLICT') {
+      return res.status(409).json({ ok: false, error: e.message })
+    }
     return res.status(500).json({ ok: false, error: e.message })
   }
 })
@@ -304,9 +342,9 @@ app.post('/api/queue/call-next', requireAuth, async (req, res) => {
     return res.status(404).json({ ok: false, error: '대기중인 예약이 없습니다.' })
   }
 
-  await notifyQueueTurn(reservation)
+  const outcome = await notifyQueueTurn(reservation)
 
-  return res.json({ ok: true, id: reservation.id, queueNumber: reservation.queueNumber, status: reservation.status })
+  return res.json({ ok: true, id: reservation.id, queueNumber: reservation.queueNumber, status: reservation.status, alreadyProcessed: !outcome.changed })
 })
 
 // 특정 예약을 대기열 순서와 무관하게 바로 호출한다 (관리자 전용).
@@ -318,12 +356,15 @@ app.post('/api/reservations/:id/call', requireAuth, async (req, res) => {
   }
   if (!assertOwnsReservation(req, res, reservation)) return
   if (reservation.status !== 'waiting') {
+    if (['called', 'notify_failed'].includes(reservation.status)) {
+      return res.json({ ok: true, id: reservation.id, queueNumber: reservation.queueNumber, status: reservation.status, alreadyProcessed: true })
+    }
     return res.status(400).json({ ok: false, error: '대기중인 예약만 호출할 수 있습니다.' })
   }
 
-  await notifyQueueTurn(reservation)
+  const outcome = await notifyQueueTurn(reservation)
 
-  return res.json({ ok: true, id: reservation.id, queueNumber: reservation.queueNumber, status: reservation.status })
+  return res.json({ ok: true, id: reservation.id, queueNumber: reservation.queueNumber, status: reservation.status, alreadyProcessed: !outcome.changed })
 })
 
 // 예약을 삭제한다 (관리자 전용). 테스트 데이터 정리나 손님 취소 처리용.
@@ -346,6 +387,12 @@ app.post('/api/reservations/:id/complete', requireAuth, async (req, res) => {
   }
   if (!assertOwnsReservation(req, res, existing)) return
   const reservation = await markReservationCompleted(req.params.id)
+  if (!reservation) {
+    if (existing.status === 'completed') {
+      return res.json({ ok: true, id: existing.id, status: existing.status, alreadyCompleted: true })
+    }
+    return res.status(409).json({ ok: false, error: '호출완료 또는 알림실패 상태의 예약만 완료할 수 있습니다.' })
+  }
   return res.json({ ok: true, id: reservation.id, status: reservation.status })
 })
 
@@ -394,10 +441,13 @@ app.post('/api/pos/queue/:id/call', posLimiter, requireStore, async (req, res) =
     return res.status(404).json({ ok: false, error: '예약을 찾을 수 없습니다.' })
   }
   if (reservation.status !== 'waiting') {
+    if (['called', 'notify_failed'].includes(reservation.status)) {
+      return res.json({ ok: true, id: reservation.id, status: reservation.status, alreadyProcessed: true })
+    }
     return res.status(400).json({ ok: false, error: '대기중인 예약만 호출할 수 있습니다.' })
   }
-  await notifyQueueTurn(reservation)
-  return res.json({ ok: true, id: reservation.id, status: reservation.status })
+  const outcome = await notifyQueueTurn(reservation)
+  return res.json({ ok: true, id: reservation.id, status: reservation.status, alreadyProcessed: !outcome.changed })
 })
 
 app.post('/api/pos/queue/:id/complete', posLimiter, requireStore, async (req, res) => {
@@ -406,6 +456,12 @@ app.post('/api/pos/queue/:id/complete', posLimiter, requireStore, async (req, re
     return res.status(404).json({ ok: false, error: '예약을 찾을 수 없습니다.' })
   }
   const reservation = await markReservationCompleted(req.params.id)
+  if (!reservation) {
+    if (existing.status === 'completed') {
+      return res.json({ ok: true, id: existing.id, status: existing.status, alreadyCompleted: true })
+    }
+    return res.status(409).json({ ok: false, error: '호출완료 또는 알림실패 상태의 예약만 완료할 수 있습니다.' })
+  }
   return res.json({ ok: true, id: reservation.id, status: reservation.status })
 })
 
@@ -613,22 +669,52 @@ app.post('/api/webhooks/toss/payment', async (req, res) => {
 })
 
 async function sendDuePromotions() {
-  const due = await listDuePromotions()
+  const due = await claimDuePromotions()
+  let sent = 0
+  let failed = 0
   for (const payment of due) {
     try {
       await sendPromoAlimtalk({ phone: payment.phone, carNumber: payment.carNumber, storeName: payment.store?.name })
-      await markPromoSent(payment.id)
+      if (await markPromoSent(payment.id)) sent += 1
     } catch (notifyError) {
+      failed += 1
       console.error(`프로모션 알림톡 발송 실패 [결제 id=${payment.id}]:`, notifyError.message)
-      // 실패 시 promoSent를 true로 바꾸지 않아 다음 스케줄 실행 때 재시도한다
+      await releasePromoClaim(payment.id)
     }
   }
+  return { claimed: due.length, sent, failed }
 }
 
-// 매일 오전 10시, 결제일로부터 3개월이 지난 고객에게 홍보 알림톡을 자동 발송한다.
-cron.schedule('0 10 * * *', sendDuePromotions)
+function requirePromotionJobAuth(req, res, next) {
+  const expected = process.env.PROMOTION_JOB_TOKEN
+  const supplied = req.get('x-promotion-job-token') || ''
+  if (!expected) {
+    return res.status(503).json({ ok: false, error: '프로모션 작업 인증이 설정되지 않았습니다.' })
+  }
+  const crypto = require('node:crypto')
+  const expectedBuf = Buffer.from(expected)
+  const suppliedBuf = Buffer.from(supplied)
+  if (expectedBuf.length !== suppliedBuf.length || !crypto.timingSafeEqual(expectedBuf, suppliedBuf)) {
+    return res.status(401).json({ ok: false, error: 'unauthorized' })
+  }
+  return next()
+}
 
-app.get('/healthz', (req, res) => res.send('ok'))
+// Cloud Scheduler가 매일 오전 10시(KST)에 호출한다. Cloud Run 인스턴스마다 cron을 띄우지
+// 않고, 공유 claim + promoSent 조건으로 동일 작업의 재전송을 막는다.
+app.post('/internal/jobs/send-promotions', requirePromotionJobAuth, async (req, res) => {
+  try {
+    const result = await sendDuePromotions()
+    return res.json({ ok: true, ...result })
+  } catch (error) {
+    console.error('[promotion-job] 처리 실패:', error)
+    return res.status(500).json({ ok: false, error: '프로모션 작업 처리에 실패했습니다.' })
+  }
+})
+
+// Cloud Run 공개 도메인에서는 /healthz가 Google 엣지 경로로 예약되어 있어
+// Express까지 도달하지 않을 수 있으므로 별도 경로를 사용한다.
+app.get('/health', (req, res) => res.send('ok'))
 
 const PORT = process.env.PORT || 3000
 Promise.all([ensureDefaultStore(), ensureDefaultHqAdmin()])

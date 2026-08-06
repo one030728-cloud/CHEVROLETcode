@@ -40,9 +40,9 @@ front-plugin/
 http://localhost:3000/toss-plugin/index.html
 ```
 
-로컬/`chevroletcode.onrender.com` 도메인에서는 `sdk.js`가 `merchant.id: 0` 테스트 매장 정보를
-자동으로 채워 넣으므로, 실제 단말기 없이도 예약/결제 흐름을 끝까지 눌러볼 수 있습니다
-(백엔드가 부팅 시 `merchantId: '0'` 테스트 매장을 자동 시드해둠).
+로컬 미리보기에서는 `sdk.js`가 `merchant.id: 0` 테스트 매장 정보를 자동으로 채워 넣으므로,
+실제 단말기 없이도 예약/결제 흐름을 끝까지 눌러볼 수 있습니다
+(개발 환경에서만 백엔드가 `merchantId: '0'` 테스트 매장을 자동 시드함).
 
 ## 개발 배포 ZIP 만들기
 
@@ -51,7 +51,8 @@ http://localhost:3000/toss-plugin/index.html
 
 ```bash
 cd front-plugin
-npm run zip
+# bash: CHEVROLET_API_BASE_URL=https://<cloud-run-url> npm run zip
+# PowerShell: $env:CHEVROLET_API_BASE_URL='https://<cloud-run-url>'; npm run zip
 ```
 
 생성 파일: `chevrolet-front-plugin.zip`
@@ -65,6 +66,7 @@ payment.html
 reservation.html
 sdk.js
 settings.html
+api-config.js
 ```
 
 프론트 플러그인 ZIP에는 `main.js`가 필요하지 않습니다. `main.js`는 토스 POS의 별도
@@ -77,9 +79,9 @@ UI를 사용하는 iframe 패키지 방식입니다.
 전체 절차(플러그인 등록 → 테스트 가맹점 연결 → ZIP 배포)가 정리되어 있습니다. 요약하면:
 
 1. [토스플레이스 개발자센터](https://developers.tossplace.com/login)에서 **내 플러그인 → 플러그인 등록**을
-   열고 타입을 `토스프론트`로 선택합니다. ACL에는 `https://chevroletcode.onrender.com`을 등록합니다.
+   열고 타입을 `토스프론트`로 선택합니다. ACL에는 배포한 Cloud Run API URL을 등록합니다.
 2. 테스트 가맹점에 플러그인을 연결하고, 테스트 프론트를 테스트 단말기로 등록합니다.
-3. `cd front-plugin && npm run zip`으로 만든 `chevrolet-front-plugin.zip`을
+3. `CHEVROLET_API_BASE_URL=https://<cloud-run-url> cd front-plugin && npm run zip`으로 만든 `chevrolet-front-plugin.zip`을
    **내 플러그인 → 개발 배포 → 개발용 파일 추가**에 업로드한 뒤 테스트 기기에 배포합니다.
 4. 프론트 설정에서 `7055` 입력 → **플러그인 업데이트** 또는 **토스 프론트 재시작**을 실행합니다.
 5. 개발 배포는 검수 없이 최대 5개 단말기에서 즉시 확인할 수 있고, 전체 매장 배포는 검수 후
