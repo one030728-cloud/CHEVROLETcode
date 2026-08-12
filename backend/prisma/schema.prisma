@@ -69,6 +69,7 @@ model Payment {
   createdAt   DateTime  @default(now())
 
   @@index([storeId])
+  @@index([promoAt, promoSent, promoClaimedAt])
 }
 
 // Design Ref: Phase 4 결제 웹훅 수신. x-toss-webhook-id로 중복 수신을 막는다

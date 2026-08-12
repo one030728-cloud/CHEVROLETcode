@@ -1,0 +1,3 @@
+-- No database changes are required.
+-- The Payment promo index already exists in the initial PostgreSQL migration;
+-- this migration records the corresponding @@index declaration in schema.prisma.
