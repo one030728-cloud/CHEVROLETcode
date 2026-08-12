@@ -59,7 +59,7 @@ model Payment {
   paymentKey  String?   @unique
   carNumber   String?
   serviceType String?
-  phone       String
+  phone       String?
   amount      Int?
   status      String    @default("requested")
   promoAt     DateTime

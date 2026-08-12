@@ -340,6 +340,7 @@ async function claimDuePromotions(limit = 100) {
     where: {
       promoSent: false,
       promoAt: { lte: now },
+      phone: { not: null, notIn: [''] },
       OR: [{ promoClaimedAt: null }, { promoClaimedAt: { lt: staleBefore } }],
     },
     orderBy: { promoAt: 'asc' },

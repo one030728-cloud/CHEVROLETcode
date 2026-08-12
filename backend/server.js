@@ -677,7 +677,7 @@ app.post('/api/webhooks/toss/payment', async (req, res) => {
             paymentKey,
             carNumber: null,
             serviceType: null,
-            phone: '',
+            phone: null,
             amount: Number.isSafeInteger(amount) && amount >= 0 ? amount : null,
           })
           console.log(`[webhook] 결제 승인 백업 기록 생성: payment id=${recorded.id}, paymentKey=${paymentKey}`)
