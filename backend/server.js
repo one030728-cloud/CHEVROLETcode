@@ -34,12 +34,8 @@ const {
   releasePromoClaim,
 } = require('./src/store')
 const { PostgresRateLimitStore } = require('./src/rateLimitStore')
-const {
-  sendReservationAlimtalk,
-  sendQueueTurnAlimtalk,
-  sendReceiptAlimtalk,
-  sendPromoAlimtalk,
-} = require('./src/solapi')
+const logger = require('./src/logger')
+const solapi = require('./src/solapi')
 const { hashPassword, verifyPassword, signAdminToken, verifyAdminToken } = require('./src/auth')
 
 // JWT_SECRET이 없으면(로컬 개발) 매 부팅마다 랜덤 값을 생성한다 — 서버를 재시작하면
@@ -50,7 +46,7 @@ if (!process.env.JWT_SECRET && process.env.NODE_ENV === 'production') {
 }
 if (!process.env.JWT_SECRET) {
   process.env.JWT_SECRET = require('node:crypto').randomBytes(32).toString('hex')
-  console.warn('[auth] JWT_SECRET이 설정되지 않아 임시 값으로 발급합니다. 운영 배포 전 .env에 고정값을 지정하세요.')
+  logger.warn('[auth] JWT_SECRET이 설정되지 않아 임시 값으로 발급합니다.', { environment: process.env.NODE_ENV || 'development' })
 }
 
 const app = express()
@@ -245,15 +241,21 @@ async function notifyQueueTurn(reservation) {
   }
   reservation.status = 'called'
   try {
-    await sendQueueTurnAlimtalk({
+    await solapi.sendQueueTurnAlimtalk({
       phone: reservation.phone,
       carNumber: reservation.carNumber,
       queueNumber: reservation.queueNumber,
       serviceType: reservation.serviceType,
       storeName: reservation.store?.name,
+      storeId: reservation.storeId,
+      reservationId: reservation.id,
     })
   } catch (notifyError) {
-    console.error(`순서 알림톡 발송 실패 [예약 id=${reservation.id}]:`, notifyError.message)
+    logger.error('순서 알림톡 발송 실패', {
+      reservationId: reservation.id,
+      storeId: reservation.storeId,
+      error: notifyError.message,
+    })
     const failed = await markReservationNotifyFailed(reservation.id)
     reservation.status = failed?.status || (await getReservation(reservation.id))?.status || 'notify_failed'
   }
@@ -313,16 +315,22 @@ app.post('/api/reservations', reservationLimiter, requireStore, async (req, res)
     reservation.store = req.store // notifyQueueTurn/알림톡에서 #{매장명}으로 쓰기 위해 붙여둔다
 
     try {
-      await sendReservationAlimtalk({
+      await solapi.sendReservationAlimtalk({
         phone,
         carNumber,
         queueNumber: reservation.queueNumber,
         peopleAhead,
         serviceType,
         storeName: req.store.name,
+        storeId,
+        reservationId: reservation.id,
       })
     } catch (notifyError) {
-      console.error(`예약 접수 알림 발송 실패 [예약 id=${reservation.id}]:`, notifyError.message)
+      logger.error('예약 접수 알림 발송 실패', {
+        reservationId: reservation.id,
+        storeId,
+        error: notifyError.message,
+      })
       // 접수 안내 알림 발송에 실패해도 손님은 여전히 대기중이므로 status는 바꾸지 않는다.
     }
 
@@ -335,7 +343,7 @@ app.post('/api/reservations', reservationLimiter, requireStore, async (req, res)
       status: reservation.status,
     })
   } catch (e) {
-    console.error('reservation error:', e)
+    logger.error('reservation error', { storeId: req.store?.id, error: e.message, code: e.code })
     if (e?.code === 'IDEMPOTENCY_KEY_CONFLICT') {
       return res.status(409).json({ ok: false, error: e.message })
     }
@@ -519,23 +527,29 @@ app.post('/api/payments', paymentLimiter, requireStore, async (req, res) => {
     const payment = await createPayment({ storeId, paymentKey, carNumber, serviceType, phone, amount })
 
     try {
-      await sendReceiptAlimtalk({
+      await solapi.sendReceiptAlimtalk({
         phone,
         carNumber: payment.carNumber,
         serviceType: payment.serviceType,
         amount: payment.amount,
         storeName: req.store.name,
+        storeId,
+        paymentId: payment.id,
       })
       await markPaymentStatus(payment.id, 'receipt_sent')
     } catch (notifyError) {
-      console.error(`전자영수증 발송 실패 [결제 id=${payment.id}]:`, notifyError.message)
+      logger.error('전자영수증 발송 실패', {
+        paymentId: payment.id,
+        storeId,
+        error: notifyError.message,
+      })
       await markPaymentStatus(payment.id, 'receipt_failed')
       // 영수증 발송에 실패해도 결제/DB 적재 자체는 성공으로 처리한다
     }
 
     return res.json({ ok: true, id: payment.id, carNumber: payment.carNumber, serviceType: payment.serviceType })
   } catch (e) {
-    console.error('payment error:', e)
+    logger.error('payment error', { storeId: req.store?.id, error: e.message, code: e.code })
     return res.status(500).json({ ok: false, error: e.message })
   }
 })
@@ -626,7 +640,7 @@ app.post('/api/webhooks/toss/payment', async (req, res) => {
     const FIVE_MIN_MS = 5 * 60 * 1000
     const tsMs = Number(timestamp)
     if (!Number.isFinite(tsMs) || Math.abs(Date.now() - tsMs) > FIVE_MIN_MS) {
-      console.error('[webhook] x-toss-timestamp가 허용 범위를 벗어남:', timestamp)
+      logger.error('[webhook] x-toss-timestamp가 허용 범위를 벗어남', { webhookId, timestamp })
       return res.status(400).json({ ok: false, error: 'stale timestamp' })
     }
 
@@ -639,11 +653,11 @@ app.post('/api/webhooks/toss/payment', async (req, res) => {
     const validSignature =
       sigBuf.length === expectedBuf.length && crypto.timingSafeEqual(sigBuf, expectedBuf)
     if (!validSignature) {
-      console.error('[webhook] 서명 검증 실패, webhookId=', webhookId)
+      logger.error('[webhook] 서명 검증 실패', { webhookId })
       return res.status(401).json({ ok: false, error: 'invalid signature' })
     }
   } else {
-    console.warn('[webhook] TOSS_WEBHOOK_SECRET 미설정 — 서명 검증 없이 수신 중 (운영 전 반드시 설정)')
+    logger.warn('[webhook] TOSS_WEBHOOK_SECRET 미설정 — 서명 검증 없이 수신 중', { webhookId })
   }
 
   // 토스 쪽 재전송에도 같은 이벤트를 두 번 처리하지 않도록 먼저 기록한다.
@@ -665,14 +679,15 @@ app.post('/api/webhooks/toss/payment', async (req, res) => {
       if (existing) {
         console.log(`[webhook] 결제 승인 수신: 이미 기록된 결제 paymentKey=${paymentKey}`)
       } else if (!paymentKey) {
-        console.warn('[webhook] 결제 승인 수신: orderId가 없어 결제 레코드를 만들 수 없습니다.')
+        logger.warn('[webhook] 결제 승인 수신: orderId가 없어 결제 레코드를 만들 수 없습니다.', { webhookId })
       } else {
         const store = await findStoreByMerchantId(payment.merchantId)
         if (!store) {
-          console.warn(
-            `[webhook] 결제 승인 수신: 등록되지 않은 merchantId=${payment.merchantId}, ` +
-              `paymentKey=${paymentKey} — DB 반영을 건너뜁니다.`
-          )
+          logger.warn('[webhook] 등록되지 않은 merchantId로 결제 반영을 건너뜁니다.', {
+            webhookId,
+            merchantId: payment.merchantId,
+            paymentKey,
+          })
         } else {
           const amount =
             payment.amount === undefined || payment.amount === null || payment.amount === ''
@@ -695,21 +710,26 @@ app.post('/api/webhooks/toss/payment', async (req, res) => {
       if (existing) {
         const cancelled = await markPaymentStatus(existing.id, 'cancelled')
         if (cancelled) {
-          console.warn(`[webhook] 결제 취소 반영: payment id=${existing.id}, paymentKey=${paymentKey}`)
+          logger.warn('[webhook] 결제 취소 반영', { webhookId, paymentId: existing.id, paymentKey })
         } else {
-          console.warn(`[webhook] 결제 취소 수신: payment id=${existing.id} 상태 반영에 실패했습니다.`)
+          logger.warn('[webhook] 결제 취소 수신: 상태 반영에 실패했습니다.', {
+            webhookId,
+            paymentId: existing.id,
+            paymentKey,
+          })
         }
       } else {
-        console.warn(
-          `[webhook] 결제 취소 수신: 매칭되는 결제가 없습니다. merchantId=${payment.merchantId}, ` +
-            `orderId=${payment.orderId} — 수동 확인 필요.`
-        )
+        logger.warn('[webhook] 결제 취소 수신: 매칭되는 결제가 없습니다.', {
+          webhookId,
+          merchantId: payment.merchantId,
+          paymentKey,
+        })
       }
     } else {
       console.log('[webhook] 처리 대상 아닌 이벤트:', eventType)
     }
   } catch (e) {
-    console.error('[webhook] 처리 중 오류:', e.message)
+    logger.error('[webhook] 처리 중 오류', { webhookId, error: e.message, eventType: req.body?.type })
   }
 })
 
@@ -719,11 +739,21 @@ async function sendDuePromotions() {
   let failed = 0
   for (const payment of due) {
     try {
-      await sendPromoAlimtalk({ phone: payment.phone, carNumber: payment.carNumber, storeName: payment.store?.name })
+      await solapi.sendPromoAlimtalk({
+        phone: payment.phone,
+        carNumber: payment.carNumber,
+        storeName: payment.store?.name,
+        storeId: payment.storeId,
+        paymentId: payment.id,
+      })
       if (await markPromoSent(payment.id)) sent += 1
     } catch (notifyError) {
       failed += 1
-      console.error(`프로모션 알림톡 발송 실패 [결제 id=${payment.id}]:`, notifyError.message)
+      logger.error('프로모션 알림톡 발송 실패', {
+        paymentId: payment.id,
+        storeId: payment.storeId,
+        error: notifyError.message,
+      })
       await releasePromoClaim(payment.id)
     }
   }
@@ -752,7 +782,7 @@ app.post('/internal/jobs/send-promotions', requirePromotionJobAuth, async (req, 
     const result = await sendDuePromotions()
     return res.json({ ok: true, ...result })
   } catch (error) {
-    console.error('[promotion-job] 처리 실패:', error)
+    logger.error('[promotion-job] 처리 실패', { error: error.message })
     return res.status(500).json({ ok: false, error: '프로모션 작업 처리에 실패했습니다.' })
   }
 })
@@ -762,13 +792,19 @@ app.post('/internal/jobs/send-promotions', requirePromotionJobAuth, async (req, 
 app.get('/health', (req, res) => res.send('ok'))
 
 const PORT = process.env.PORT || 3000
-Promise.all([ensureDefaultStore(), ensureDefaultHqAdmin()])
-  .then(() => {
-    app.listen(PORT, () => console.log(`쉐보레 토스플러그인 서버 실행 중: http://localhost:${PORT}`))
-  })
-  .catch((e) => {
-    console.error('부팅 시드 실패:', e.message)
-    process.exit(1)
-  })
+function startServer() {
+  return Promise.all([ensureDefaultStore(), ensureDefaultHqAdmin()])
+    .then(() => {
+      app.listen(PORT, () => console.log(`쉐보레 토스플러그인 서버 실행 중: http://localhost:${PORT}`))
+    })
+    .catch((e) => {
+      logger.error('부팅 시드 실패', { error: e.message })
+      process.exit(1)
+    })
+}
+
+if (require.main === module) {
+  startServer()
+}
 
 module.exports = { app, sendDuePromotions }
