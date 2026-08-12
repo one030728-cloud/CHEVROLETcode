@@ -403,6 +403,7 @@ async function recordWebhookEventOnce(webhookId, eventType) {
 }
 
 module.exports = {
+  prisma,
   ensureDefaultStore,
   ensureDefaultHqAdmin,
   bulkCreateStores,

@@ -90,3 +90,11 @@ model QueueCounter {
 
   @@unique([storeId, date])
 }
+
+model RateLimitHit {
+  key         String   @id
+  windowStart DateTime
+  count       Int
+
+  @@index([windowStart])
+}

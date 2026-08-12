@@ -4,6 +4,7 @@ const cors = require('cors')
 const rateLimit = require('express-rate-limit')
 const path = require('node:path')
 const {
+  prisma,
   ensureDefaultStore,
   ensureDefaultHqAdmin,
   bulkCreateStores,
@@ -32,6 +33,7 @@ const {
   markPromoSent,
   releasePromoClaim,
 } = require('./src/store')
+const { PostgresRateLimitStore } = require('./src/rateLimitStore')
 const {
   sendReservationAlimtalk,
   sendQueueTurnAlimtalk,
@@ -150,6 +152,7 @@ async function requireStore(req, res, next) {
 const adminLoginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 10,
+  store: new PostgresRateLimitStore(prisma, { prefix: 'admin-login', windowMs: 15 * 60 * 1000 }),
   standardHeaders: true,
   legacyHeaders: false,
   message: { ok: false, error: '요청이 너무 많습니다. 잠시 후 다시 시도해주세요.' },
@@ -210,6 +213,7 @@ app.post('/api/admin/store-admins', requireAuth, requireRole('hq_admin'), async 
 const reservationLimiter = rateLimit({
   windowMs: 10 * 60 * 1000,
   limit: 5,
+  store: new PostgresRateLimitStore(prisma, { prefix: 'reservation', windowMs: 10 * 60 * 1000 }),
   standardHeaders: true,
   legacyHeaders: false,
   message: { ok: false, error: '요청이 너무 많습니다. 잠시 후 다시 시도해주세요.' },
@@ -218,6 +222,7 @@ const reservationLimiter = rateLimit({
 const paymentLimiter = rateLimit({
   windowMs: 10 * 60 * 1000,
   limit: 10,
+  store: new PostgresRateLimitStore(prisma, { prefix: 'payment', windowMs: 10 * 60 * 1000 }),
   standardHeaders: true,
   legacyHeaders: false,
   message: { ok: false, error: '요청이 너무 많습니다. 잠시 후 다시 시도해주세요.' },
@@ -427,6 +432,7 @@ app.get('/api/reservations/failed', requireAuth, async (req, res) => {
 const posLimiter = rateLimit({
   windowMs: 60 * 1000,
   limit: 60,
+  store: new PostgresRateLimitStore(prisma, { prefix: 'pos', windowMs: 60 * 1000 }),
   standardHeaders: true,
   legacyHeaders: false,
   message: { ok: false, error: '요청이 너무 많습니다. 잠시 후 다시 시도해주세요.' },
