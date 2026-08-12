@@ -147,7 +147,15 @@ async function requireStore(req, res, next) {
 }
 
 // --- 관리자 인증 ---
-app.post('/api/admin/login', async (req, res) => {
+const adminLoginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { ok: false, error: '요청이 너무 많습니다. 잠시 후 다시 시도해주세요.' },
+})
+
+app.post('/api/admin/login', adminLoginLimiter, async (req, res) => {
   const email = String(req.body?.email ?? '').trim().toLowerCase()
   const password = String(req.body?.password ?? '')
   if (!email || !password) {
