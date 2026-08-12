@@ -77,16 +77,22 @@ class PostgresRateLimitStore {
   }
 
   async resetAll() {
-    await this.prisma.$executeRaw`DELETE FROM "RateLimitHit"`
+    const keyPrefix = `${this.prefix}:%`
+    await this.prisma.$executeRaw`
+      DELETE FROM "RateLimitHit"
+      WHERE "key" LIKE ${keyPrefix}
+    `
   }
 
   shutdown() {}
 
   async cleanupExpired(now) {
     const cleanupBefore = new Date(now.getTime() - Math.max(this.windowMs * 2, 60 * 1000))
+    const keyPrefix = `${this.prefix}:%`
     await this.prisma.$executeRaw`
       DELETE FROM "RateLimitHit"
-      WHERE "windowStart" < ${cleanupBefore}
+      WHERE "key" LIKE ${keyPrefix}
+        AND "windowStart" < ${cleanupBefore}
     `
   }
 }
