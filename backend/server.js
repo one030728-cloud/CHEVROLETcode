@@ -782,7 +782,7 @@ app.post('/internal/jobs/send-promotions', requirePromotionJobAuth, async (req, 
     const result = await sendDuePromotions()
     return res.json({ ok: true, ...result })
   } catch (error) {
-    logger.error('[promotion-job] 처리 실패', { error: error.message })
+    logger.error('[promotion-job] 처리 실패', { job: 'send-promotions', error: error.message })
     return res.status(500).json({ ok: false, error: '프로모션 작업 처리에 실패했습니다.' })
   }
 })
@@ -798,7 +798,7 @@ function startServer() {
       app.listen(PORT, () => console.log(`쉐보레 토스플러그인 서버 실행 중: http://localhost:${PORT}`))
     })
     .catch((e) => {
-      logger.error('부팅 시드 실패', { error: e.message })
+      logger.error('부팅 시드 실패', { phase: 'bootstrap', error: e.message })
       process.exit(1)
     })
 }
