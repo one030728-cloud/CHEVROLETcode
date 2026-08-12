@@ -600,12 +600,8 @@ app.post('/api/admin/stores/bulk', requireAuth, requireRole('hq_admin'), async (
 //   hex 인코딩 후 `v1=` 접두사. x-toss-timestamp가 현재 시각과 너무 다르면 거부해야 한다.
 // - payload: `{ id, type, createdAt, merchantId, app, data: { payment: {...} } }` 형태
 //   (이전엔 `eventType`/`data.paymentKey`로 잘못 파싱하고 있었음).
-// - ⚠️ 미해결: 문서에 확인된 payment 객체 필드(id/merchantId/orderId/amount/state 등)에는
-//   `paymentKey`가 없다. 우리 쪽에서 client가 생성해 sdk.payment.requestPayment()에 넘기는
-//   `paymentKey`가 이 payment 객체의 어느 필드(orderId? 다른 이름?)와 대응되는지 공개 문서로는
-//   확인이 안 된다 — developer-support@tossplace.com에 직접 문의해서 확정해야 정확한 매칭이 가능하다.
-//   그 전까지는 merchantId+금액 정도로만 참고 로그를 남기고, 자동으로 결제 레코드를 만들지는 않는다
-//   (잘못된 매칭으로 엉뚱한 예약에 영수증을 보내는 것보다 안전한 선택).
+// - ⚠️ 미확정 전제: client가 생성해 sdk.payment.requestPayment()에 넘긴 `paymentKey`는
+//   웹훅 payment.orderId와 1:1로 대응한다고 간주한다. 실제 결제 1~2건으로 배포 후 검증이 필요하다.
 app.post('/api/webhooks/toss/payment', async (req, res) => {
   const webhookId = req.get('x-toss-webhook-id')
   const signature = req.get('x-toss-signature')
@@ -657,17 +653,52 @@ app.post('/api/webhooks/toss/payment', async (req, res) => {
     const eventType = req.body?.type
     const payment = req.body?.data?.payment || {}
     if (eventType === 'payment.payment.approved.v1') {
-      // FR-08 미해결 사항(위 주석 참고): paymentKey 대응 필드가 확정되지 않아 자동 레코드 생성은 보류.
-      // 지금은 "이런 결제 승인이 있었다"는 사실만 로그로 남겨 관리자가 대사(reconcile)할 수 있게 한다.
-      console.warn(
-        `[webhook] 결제 승인 수신: toss payment.id=${payment.id}, merchantId=${payment.merchantId}, ` +
-          `orderId=${payment.orderId}, amount=${payment.amount} — paymentKey 매칭 필드 미확정으로 자동 처리 안 함.`
-      )
+      // 미확정 전제이며 실결제 1~2건으로 검증 필요: payment.orderId를 paymentKey로 간주한다.
+      const paymentKey = String(payment.orderId ?? '').trim() || null
+      const existing = await findPaymentByKey(paymentKey)
+      if (existing) {
+        console.log(`[webhook] 결제 승인 수신: 이미 기록된 결제 paymentKey=${paymentKey}`)
+      } else if (!paymentKey) {
+        console.warn('[webhook] 결제 승인 수신: orderId가 없어 결제 레코드를 만들 수 없습니다.')
+      } else {
+        const store = await findStoreByMerchantId(payment.merchantId)
+        if (!store) {
+          console.warn(
+            `[webhook] 결제 승인 수신: 등록되지 않은 merchantId=${payment.merchantId}, ` +
+              `paymentKey=${paymentKey} — DB 반영을 건너뜁니다.`
+          )
+        } else {
+          const amount =
+            payment.amount === undefined || payment.amount === null || payment.amount === ''
+              ? null
+              : Number(payment.amount)
+          const recorded = await createPayment({
+            storeId: store.id,
+            paymentKey,
+            carNumber: null,
+            serviceType: null,
+            phone: '',
+            amount: Number.isSafeInteger(amount) && amount >= 0 ? amount : null,
+          })
+          console.log(`[webhook] 결제 승인 백업 기록 생성: payment id=${recorded.id}, paymentKey=${paymentKey}`)
+        }
+      }
     } else if (eventType === 'payment.payment.cancelled.v1') {
-      console.warn(
-        `[webhook] 결제 취소 수신: toss payment.id=${payment.id}, merchantId=${payment.merchantId}, ` +
-          `orderId=${payment.orderId} — paymentKey 매칭 필드 미확정으로 자동 처리 안 함. 수동 확인 필요.`
-      )
+      const paymentKey = String(payment.orderId ?? '').trim() || null
+      const existing = await findPaymentByKey(paymentKey)
+      if (existing) {
+        const cancelled = await markPaymentStatus(existing.id, 'cancelled')
+        if (cancelled) {
+          console.warn(`[webhook] 결제 취소 반영: payment id=${existing.id}, paymentKey=${paymentKey}`)
+        } else {
+          console.warn(`[webhook] 결제 취소 수신: payment id=${existing.id} 상태 반영에 실패했습니다.`)
+        }
+      } else {
+        console.warn(
+          `[webhook] 결제 취소 수신: 매칭되는 결제가 없습니다. merchantId=${payment.merchantId}, ` +
+            `orderId=${payment.orderId} — 수동 확인 필요.`
+        )
+      }
     } else {
       console.log('[webhook] 처리 대상 아닌 이벤트:', eventType)
     }
