@@ -152,7 +152,10 @@ testSerial('취소 웹훅은 기존 Payment 상태를 cancelled로 변경한다'
     data: { orderId: paymentKey, merchantId: store.merchantId },
   })
   assert.equal(response.status, 200)
-  const cancelled = await waitFor(() => prisma.payment.findUnique({ where: { id: existing.id } }))
+  const cancelled = await waitFor(async () => {
+    const record = await prisma.payment.findUnique({ where: { id: existing.id } })
+    return record?.status === 'cancelled' ? record : null
+  })
   assert.equal(cancelled.status, 'cancelled')
 })
 
